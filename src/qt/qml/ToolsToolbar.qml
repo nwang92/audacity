@@ -12,6 +12,7 @@ Rectangle {
 
    property var workspaceMode: Workspace.Mode.Classic
    property alias enableVolumeTester: masterVolumeToolbar.testerVisible
+   property var enableJacktrip: 0
 
    signal playbackStarted()
    signal playbackStopped()
@@ -95,14 +96,11 @@ Rectangle {
          }
       }
 
-      FlatButton {
-         id: setup
-         x: root.width - setup.width - 12
-         icon: IconCode.SETUP
-         onClicked: toolbarHandler.Setup()
+      RowLayout {
+         id: extraButtons
+         spacing: 1
+         x: root.width - extraButtons.width - 12
 
-         // The following is a hack to vertical center this button within
-         // current row of the flow control
          QtObject {
             id: prv
             property bool stopYUpdateCascade: false
@@ -111,12 +109,24 @@ Rectangle {
          onYChanged: {
             if (!prv.stopYUpdateCascade) {
                prv.stopYUpdateCascade = true
-               root.height =  setup.y + 48
-               setup.x += 8
-               setup.y += 8
+               root.height = extraButtons.y + 48
+               extraButtons.x += 8
+               extraButtons.y += 8
             } else {
                prv.stopYUpdateCascade = false
             }
+         }
+
+         FlatButton {
+            id: setup
+            icon: IconCode.SETUP
+            onClicked: toolbarHandler.Setup()
+         }
+
+         FlatButton {
+            id: jacktripButton
+            icon: IconCode.TV
+            onClicked: enableJacktrip = ( enableJacktrip + 1 ) % 3
          }
       }
    }
@@ -128,4 +138,3 @@ Rectangle {
       color: appConfig.strokeColor1
    }
 }
-

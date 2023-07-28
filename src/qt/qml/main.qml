@@ -17,6 +17,7 @@ ApplicationWindow {
    required property ApplicationConfiguration appConfig
    property alias workspaceMode: toolsToolbar.workspaceMode
    property alias enableVolumeTester: toolsToolbar.enableVolumeTester
+   property alias enableJacktrip: toolsToolbar.enableJacktrip
    property string language: "en"
 
    QtObject {
@@ -134,7 +135,8 @@ ApplicationWindow {
    Rectangle {
       id: trackCanvas
       x: sidebar.width
-      width: root.width - sidebar.width
+      anchors.left: sidebar.right
+      anchors.right: jacktrip.left
       color: appConfig.backgroundColor3
       anchors.top: timelineRuler.bottom
       anchors.bottom: footerId.top
@@ -161,6 +163,15 @@ ApplicationWindow {
          statusBar.text = status
          timer.restart()
       }
+   }
+
+   JackTrip {
+      id: jacktrip
+      anchors.top: toolsToolbar.bottom
+      anchors.bottom: footerId.top
+      anchors.right: parent.right
+      width: enableJacktrip * 360
+      visible: enableJacktrip > 0
    }
 
    Timer {

@@ -236,6 +236,8 @@
 	<string>Audacity version ${AUDACITY_INFO_VERSION}</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Audacity requires access to the microphone only if you intend to record from it.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Audacity requires access to the camera only if you intend to record from it.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>CFBundleURLTypes</key>

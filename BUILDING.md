@@ -15,7 +15,7 @@ Please note that Xcode 14 support on macOS requires CMake 3.24.0 or later.
 Audacity uses [Conan 2](https://conan.io/) to manage dependencies. If `conan` is not already installed, Audacity will download and install it automatically.
 
 However, if you want to install Conan manually, you can do so by following the instructions on the [Conan website](https://docs.conan.io/en/latest/installation.html).
-Manual installation can be useful if you want to use Conan to manage dependencies for other projects or if you plan to have multiple builds of Audacity on the 
+Manual installation can be useful if you want to use Conan to manage dependencies for other projects or if you plan to have multiple builds of Audacity on the
 same machine.
 
 ### CMake
@@ -81,32 +81,32 @@ You will also be able to change to the scripts directory and run ./graph.pl to g
 ## Building on Windows
 
 1. Ensure the Python installer option `Add Python 3.x to PATH` is checked. Go to Windows Settings "Add or Remove Programs" and check the `Add Python to environment variables` in Python settings if Python is not in `PATH`.
-  
-2. Clone Audacity from the Audacity GitHub project. 
-  
+
+2. Clone Audacity from the Audacity GitHub project.
+
    For example, in the **git-bash** run:
 
     ```
     $ git clone https://github.com/audacity/audacity/
     ```
 
-2. Open CMake GUI. 
-   
-   Set the **Where is the source code** to the location where Audacity was cloned. 
-   
+2. Open CMake GUI.
+
+   Set the **Where is the source code** to the location where Audacity was cloned.
+
    Set **Where to build the binaries** to the location you want to place your build in. It is preferred that this location is not within the directory with the source code.
 
 3. Press **Configure**. You can choose which version of Visual Studio to use and the platform to build for in the pop-up. We support **x64** and **Win32** platforms. The **x64** platform is a default option. Press **Finish** to start the configuration process.
 
-4. After successful configuration, you will see `Configuring done` in the last line of the log. Press **Generate** to generate the Visual Studio project. 
+4. After successful configuration, you will see `Configuring done` in the last line of the log. Press **Generate** to generate the Visual Studio project.
 
 5. After you see "Generating done", press **Open Project** to open the project in Visual Studio.
-   
+
 6. Select "Build -> Build Solution".
-   
+
 7. You can now run and debug Audacity!
-      
-Generally, steps 1-5 are only needed the first-time you configure. Then, after you've generated the solution, you can open it in Visual Studio next time. If the project configuration has changed, the IDE will invoke CMake internally. 
+
+Generally, steps 1-5 are only needed the first-time you configure. Then, after you've generated the solution, you can open it in Visual Studio next time. If the project configuration has changed, the IDE will invoke CMake internally.
 
 ### Building with ASIO support on Windows
 
@@ -114,8 +114,8 @@ To enable ASIO support, please select `audacity_has_asio_support=On` in CMake af
 
 ## macOS
 
-1. Clone Audacity from the Audacity GitHub project. 
-  
+1. Clone Audacity from the Audacity GitHub project.
+
     ```
     $ git clone https://github.com/audacity/audacity/
     ```
@@ -123,16 +123,16 @@ To enable ASIO support, please select `audacity_has_asio_support=On` in CMake af
 2. Configure Audacity using CMake:
    ```
    $ mkdir build && cd build
-   $ cmake -GXcode ../audacity
+   $ cmake -GXcode -Daudacity_has_url_schemes_support=On -Daudacity_enable_experimental_qt_support=On -Daudacity_qt_enable_qml_cache_gen=On ../audacity
    ```
 
 3. Open Audacity XCode project:
    ```
    $ open Audacity.xcodeproj
    ```
-   and build Audacity using the IDE. 
+   and build Audacity using the IDE.
 
-Steps 1 and 2 are only required for first-time builds. 
+Steps 1 and 2 are only required for first-time builds.
 
 Alternatively, you can use **CLion**. If you chose to do so, open the directory where you have cloned Audacity using CLion and you are good to go.
 
@@ -143,12 +143,12 @@ Before Audacity 3.2 only **x86_64** builds and XCode "legacy" build system were 
    $ cmake -GXcode -T buildsystem=1 ../audacity
 ```
 
-to configure Audacity. 
+to configure Audacity.
 
 ## Linux & Other OS
 
-1. Clone Audacity from the Audacity GitHub project. 
-  
+1. Clone Audacity from the Audacity GitHub project.
+
     ```
     $ git clone https://github.com/audacity/audacity/
     ```
@@ -208,7 +208,7 @@ There are a few cases when the local library build is preferred:
 
 It is not advised to mix system and local libraries, except for the list above. `ZLib` is a very common dependency; it is possible to mix system and local libraries in one build. However, we advise against doing so.
 
-There is a [`Dockerfile`](linux/build-environment/Dockerfile) that can be used as an example of how to build Audacity using system libraries: 
+There is a [`Dockerfile`](linux/build-environment/Dockerfile) that can be used as an example of how to build Audacity using system libraries:
 
 ```
 $ docker build -t audacity_linux_env .\linux\build-environment\
@@ -219,12 +219,12 @@ To find system packages, we rely on `pkg-config`. There are several packages tha
 
 ### Disabling Conan
 
-Conan can be disabled completely using `-Daudacity_conan_enabled=Off` during the configuration. 
-This option implies `-Daudacity_obey_system_dependencies=On` and disables `local` for packages that are managed with Conan. 
+Conan can be disabled completely using `-Daudacity_conan_enabled=Off` during the configuration.
+This option implies `-Daudacity_obey_system_dependencies=On` and disables `local` for packages that are managed with Conan.
 
 ### Disabling pre-built binaries downloads for Conan
 
-It is possible to force Conan to build all the dependencies from the source code without using the pre-built binaries. To do so, please pass `-Daudacity_conan_allow_prebuilt_binaries=Off` to CMake during the configuration. 
+It is possible to force Conan to build all the dependencies from the source code without using the pre-built binaries. To do so, please pass `-Daudacity_conan_allow_prebuilt_binaries=Off` to CMake during the configuration.
 
 Additionally, passing `-Daudacity_conan_force_build_dependencies=On` will force Conan to rebuild all the packaged during *every* configuration. This can be usefull for the offline builds against the Conan download cache.
 
@@ -295,8 +295,8 @@ $ cmake -GXcode -DMACOS_ARCHITECTURE=arm64 ../audacity
 
 The default build architecture is selected based on `CMAKE_HOST_SYSTEM_PROCESSOR` value.
 
-When cross-compiling from Intel to AppleSilicon, or if *Rosetta 2* is not installed on the AppleSilicon Mac, 
-a native Audacity version build directory is required, as Audacity needs a working `image-compiler`. 
+When cross-compiling from Intel to AppleSilicon, or if *Rosetta 2* is not installed on the AppleSilicon Mac,
+a native Audacity version build directory is required, as Audacity needs a working `image-compiler`.
 
 For example, to build ARM64 version of Audacity on Intel Mac:
 

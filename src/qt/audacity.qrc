@@ -10,5 +10,6 @@
         <file>qml/ToolsToolbar.qml</file>
         <file>qml/TransportToolbar.qml</file>
         <file>qml/Workspace.qml</file>
+        <file>qml/JackTrip.qml</file>
     </qresource>
 </RCC>

@@ -4,9 +4,13 @@
 #include <QtQml/QQmlApplicationEngine>
 #include <QtWidgets/QApplication>
 #include "uicomponents/ApplicationConfiguration.h"
+#include <QtWebView>
 
 int main(int argc, char *argv[])
 {
+   qputenv("QT_WEBVIEW_PLUGIN", "native");
+   QtWebView::initialize();
+
    QGuiApplication app(argc, argv);
    ApplicationConfiguration appConfig;
 

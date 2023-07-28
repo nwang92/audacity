@@ -162,7 +162,7 @@ class wxWidgetsAudacityDependency(AudacityDependency):
             ("tiff", "off"),
             ("compatibility", 3.0),
             ("secretstore", False), ("opengl", False), ("propgrid", False), ("ribbon", False),
-            ("richtext", False), ("stc", False), ("webview", False), ("help", False),
+            ("richtext", False), ("stc", False), ("webview", True), ("help", False),
             ("html_help", False), ("fs_inet", False), ("protocol", False),
         ]
 
@@ -247,7 +247,7 @@ class Qt6Dependency(AudacityDependency):
 
     _enabled_modules = [
         "qtsvg", "qtdeclarative", "qttools", "qttranslations",
-        "qtquicktimeline", "qtlottie",
+        "qtquicktimeline", "qtlottie", "qtwebview",
         "qtimageformats", "qtlanguageserver", "qtshadertools"
     ]
 
