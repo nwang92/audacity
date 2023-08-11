@@ -739,6 +739,8 @@ list( APPEND SOURCES
       toolbars/EditToolBar.h
       toolbars/MeterToolBar.cpp
       toolbars/MeterToolBar.h
+      toolbars/JackTripToolBar.cpp
+      toolbars/JackTripToolBar.h
       toolbars/ScrubbingToolBar.cpp
       toolbars/ScrubbingToolBar.h
       toolbars/SelectionBar.cpp

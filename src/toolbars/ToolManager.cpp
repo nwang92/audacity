@@ -533,7 +533,8 @@ static struct DefaultConfigEntry {
    { wxT("CutCopyPaste"),      wxT("Edit"),            {}                },
    { wxT("Audio Setup"),       wxT("CutCopyPaste"),    {}                },
 #ifdef HAS_AUDIOCOM_UPLOAD
-   { wxT("Share Audio"),       wxT("Audio Setup"),     {}                },
+   { wxT("JackTrip"),          wxT("Audio Setup"),     {}                },
+   { wxT("Share Audio"),       wxT("JackTrip"),        {}                },
    { wxT("RecordMeter"),       wxT("Share Audio"),     {}                },
 #else
    { wxT("RecordMeter"),       wxT("Audio Setup"),     {}                },

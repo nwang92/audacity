@@ -24,9 +24,9 @@ set ( LIBRARIES
    lib-network-manager-interface # Required for the networking
    lib-files-interface # FileNames
    lib-strings-interface # Languages
-
+   PUBLIC
+      rapidjson::rapidjson
    PRIVATE
-      rapidjson::rapidjson # Protocol is JSON based
       wxwidgets::base # Required to retrieve the OS information
 )
 
