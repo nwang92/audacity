@@ -79,7 +79,7 @@ class JackTripToolBar final : public ToolBar {
    void OnRecording(std::string serverID, int id);
    std::string ExecCommand(const char* cmd);
    bool JackTripExists();
-   void FetchRecordings(std::string serverID);
+   void GetUserInfo();
    void GetRecordingDownloadURL(std::string serverID, std::string recordingID);
    std::string GetDownloadLocalDir(std::string recordingID);
    std::string GetDownloadFilenameFromUrl(std::string url);
@@ -95,7 +95,7 @@ class JackTripToolBar final : public ToolBar {
 
    class Choices;
    void RepopulateMenus();
-   void FillServers();
+   void FillRecordings();
    void RegenerateTooltips() override;
 
    void MakeJackTripButton();
@@ -178,6 +178,7 @@ class JackTripToolBar final : public ToolBar {
    };
 
    // Jacktrip-specific options
+   std::string mUserID;
    std::unique_ptr<BasicUI::ProgressDialog> mProgressDialog;
    std::map<std::string, std::string> mServerIdToName;
    std::map<std::string, std::string> mRecordingIdToName;

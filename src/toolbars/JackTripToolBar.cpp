@@ -113,6 +113,7 @@ void JackTripToolBar::Create(wxWindow *parent)
    std::cout << "Hello World!" << std::endl;
    std::cout << "Hello World!" << std::endl;
 
+   GetUserInfo();
    /*
    if (JackTripExists()) {
       // parse for input devices
@@ -355,18 +356,61 @@ void JackTripToolBar::RegenerateTooltips()
 
 void JackTripToolBar::RepopulateMenus()
 {
-   FillServers();
+   FillRecordings();
    // make the device display selection reflect the prefs if they exist
    UpdatePrefs();
 }
 
-void JackTripToolBar::FillServers()
+void JackTripToolBar::GetUserInfo()
 {
+   mUserID.clear();
+
+   audacity::network_manager::Request request("https://auth.jacktrip.org/userinfo");
+   request.setHeader("Authorization", kAuthToken);
+   request.setHeader("Content-Type", "application/json");
+   request.setHeader("Accept", "application/json");
+
+   auto response = audacity::network_manager::NetworkManager::GetInstance().doGet(request);
+   response->setRequestFinishedCallback(
+      [response, this](auto)
+      {
+         const auto httpCode = response->getHTTPCode();
+         std::cout << "HTTP code: " << httpCode << std::endl;
+
+         if (httpCode != 200)
+            return;
+
+         const auto body = response->readAll<std::string>();
+
+         using namespace rapidjson;
+         Document document;
+         document.Parse(body.data(), body.size());
+
+         // Check for parse errors
+         if (document.HasParseError()) {
+            std::cout << "Error parsing JSON: " << document.GetParseError() << std::endl;
+            wxTheApp->CallAfter([this]{ mProgressDialog.reset(); });
+            return;
+         }
+
+         auto sub = document["sub"].GetString();
+         std::cout << "sub is: " << sub << std::endl;
+         mUserID = sub;
+         RepopulateMenus();
+      }
+   );
+}
+
+void JackTripToolBar::FillRecordings()
+{
+   if (mUserID.empty()) {
+      return;
+   }
    mServerIdToName.clear();
    mRecordingIdToName.clear();
    mServerIdToRecordings.clear();
 
-   audacity::network_manager::Request request("https://app.jacktrip.org/api/servers");
+   audacity::network_manager::Request request("https://app.jacktrip.org/api/users/" + mUserID + "/recordings");
    request.setHeader("Authorization", kAuthToken);
    request.setHeader("Content-Type", "application/json");
    request.setHeader("Accept", "application/json");
@@ -394,13 +438,41 @@ void JackTripToolBar::FillServers()
             return;
          }
 
+         // sort with newest on top
+         struct CreatedAtComparer {
+            bool operator()(const Value& left, const Value& right) const {
+               auto leftStr = left.GetObject()["createdAt"].GetString();
+               auto rightStr = right.GetObject()["createdAt"].GetString();
+               return strcmp(leftStr, rightStr) > 0;
+            }
+         };
+         std::sort(document.Begin(), document.End(), CreatedAtComparer());
+
          // Iterate over the array of objects
          Value::ConstValueIterator itr;
+         JackTripChoices recordings;
+         std::map<std::string, wxArrayStringEx> recordingNamesByServerID;
+         std::map<std::string, wxArrayStringEx> recordingIdsByServerID;
          for (itr = document.Begin(); itr != document.End(); ++itr) {
-            auto serverID = itr->GetObject()["id"].GetString();
-            auto serverName = itr->GetObject()["name"].GetString();
-            FetchRecordings(serverID);
+            auto serverID = itr->GetObject()["serverId"].GetString();
+            auto serverName = itr->GetObject()["serverName"].GetString();
             mServerIdToName[serverID] = serverName;
+
+            auto recordingName = itr->GetObject()["name"].GetString();
+            auto recordingID = itr->GetObject()["id"].GetString();
+            recordingNamesByServerID[serverID].push_back(recordingName);
+            recordingIdsByServerID[serverID].push_back(recordingID);
+         }
+
+         for (auto it = mServerIdToName.begin(); it != mServerIdToName.end(); it++) {
+            auto serverID = it->first;
+            JackTripChoices recordings;
+
+            auto names = recordingNamesByServerID[serverID];
+            auto ids = recordingIdsByServerID[serverID];
+
+            recordings.Set(std::move(names), std::move(ids));
+            mServerIdToRecordings[serverID] = std::move(recordings);
          }
       }
    );
@@ -444,7 +516,7 @@ void JackTripToolBar::OnRecording(std::string serverID, int id)
 {
    std::cout << "Clicked on recording: " << id << " for serverID: " << serverID << std::endl;
    if (mServerIdToRecordings.find(serverID) == mServerIdToRecordings.end()) {
-      std::cout << "Key found" << std::endl;
+      std::cout << "Key not found" << std::endl;
       return;
    }
 
@@ -498,60 +570,6 @@ void JackTripToolBar::StopJackTrip()
    if (mExec) {
       pclose(mExec);
    }
-}
-
-void JackTripToolBar::FetchRecordings(std::string serverID)
-{
-   if (serverID.empty()) {
-      return;
-   }
-   std::string url = "https://app.jacktrip.org/api/servers/" + serverID + "/recordings";
-   audacity::network_manager::Request request(url);
-   request.setHeader("Authorization", kAuthToken);
-   request.setHeader("Content-Type", "application/json");
-   request.setHeader("Accept", "application/json");
-
-   auto response = audacity::network_manager::NetworkManager::GetInstance().doGet(request);
-   response->setRequestFinishedCallback(
-      [response, serverID, this](auto)
-      {
-         const auto httpCode = response->getHTTPCode();
-         std::cout << "HTTP code: " << httpCode << std::endl;
-
-         if (httpCode != 200)
-            return;
-
-         const auto body = response->readAll<std::string>();
-
-         using namespace rapidjson;
-
-         Document document;
-         document.Parse(body.data(), body.size());
-
-         // Check for parse errors
-         if (document.HasParseError()) {
-            std::cout << "Error parsing JSON: " << document.GetParseError() << std::endl;
-            return;
-         }
-
-         // Iterate over the array of objects
-         JackTripChoices recordings;
-         wxArrayStringEx names;
-         wxArrayStringEx ids;
-         Value::ConstValueIterator itr;
-         for (itr = document.Begin(); itr != document.End(); ++itr) {
-            auto recordingName = itr->GetObject()["name"].GetString();
-            auto recordingID = itr->GetObject()["id"].GetString();
-            names.push_back(recordingName);
-            ids.push_back(recordingID);
-         }
-
-         if (names.size() > 0) {
-            recordings.Set(std::move(names), std::move(ids));
-            mServerIdToRecordings[serverID] = std::move(recordings);
-         }
-      }
-   );
 }
 
 void JackTripToolBar::GetRecordingDownloadURL(std::string serverID, std::string recordingID)
