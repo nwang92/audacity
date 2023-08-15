@@ -25,6 +25,9 @@
 #include <wx/wfstream.h>
 #include <wx/dir.h>
 #include <wx/filename.h>
+#include <wx/webview.h>
+#include <wx/dialog.h>
+#include "wxPanelWrapper.h"
 
 #include "../ActiveProject.h"
 
@@ -274,12 +277,10 @@ void JackTripToolBar::OnAudioSetup(wxCommandEvent& WXUNUSED(evt))
       }
    }
 
-   /*
-   menu.Append(kAudioSettings, _("&Audio Settings..."));
+   menu.Append(kAudioSettings, _("&Open Web"));
 
    menu.Bind(wxEVT_MENU_CLOSE, [this](auto&) { mJackTrip->PopUp(); });
-   menu.Bind(wxEVT_MENU, &JackTripToolBar::OnSettings, this, kAudioSettings);
-   */
+   menu.Bind(wxEVT_MENU, &JackTripToolBar::OnWeb, this, kAudioSettings);
 
    wxWindow* btn = FindWindow(ID_JACKTRIP_BUTTON);
    wxRect r = btn->GetRect();
@@ -366,7 +367,7 @@ void JackTripToolBar::GetUserInfo()
    mUserID.clear();
 
    audacity::network_manager::Request request("https://auth.jacktrip.org/userinfo");
-   request.setHeader("Authorization", kAuthToken);
+   request.setHeader("Authorization", "Bearer " + kAuthToken);
    request.setHeader("Content-Type", "application/json");
    request.setHeader("Accept", "application/json");
 
@@ -411,7 +412,7 @@ void JackTripToolBar::FillRecordings()
    mServerIdToRecordings.clear();
 
    audacity::network_manager::Request request("https://app.jacktrip.org/api/users/" + mUserID + "/recordings");
-   request.setHeader("Authorization", kAuthToken);
+   request.setHeader("Authorization", "Bearer " + kAuthToken);
    request.setHeader("Content-Type", "application/json");
    request.setHeader("Accept", "application/json");
 
@@ -534,6 +535,30 @@ void JackTripToolBar::OnRecording(std::string serverID, int id)
    GetRecordingDownloadURL(serverID, recordingID);
 }
 
+void JackTripToolBar::OnWeb(wxCommandEvent& event)
+{
+   std::cout << "Clicked on web menu item" << std::endl;
+
+   VirtualStudioDialog dlg(this, wxID_ANY, "https://www.google.com", XO("Virtual Studio"));
+   dlg.SetSize(800, 600);
+   int retCode = dlg.ShowModal();
+
+   dlg.Center();
+   std::cout << "Return code: " << retCode << std::endl;
+   /*
+   wxTheApp->CallAfter([this]{
+      mBrowser = wxWebView::New(this, wxID_ANY);
+      mBrowser->LoadURL("https://www.audacityteam.org");
+
+      wxDialogWrapper webDialog(this, wxID_ANY, XO("Virtual Studio"));
+      webDialog.SetTitle("Audacity Website");
+      webDialog.SetChild(mBrowser);
+      webDialog.SetSize(600, 400);
+      webDialog.ShowModal();
+   });
+   */
+}
+
 std::string JackTripToolBar::ExecCommand(const char* cmd)
 {
    std::array<char, 128> buffer;
@@ -576,7 +601,7 @@ void JackTripToolBar::GetRecordingDownloadURL(std::string serverID, std::string 
 {
    std::string url = "https://app.jacktrip.org/api/servers/" + serverID + "/recordings/" + recordingID + "/download";
    audacity::network_manager::Request request(url);
-   request.setHeader("Authorization", kAuthToken);
+   request.setHeader("Authorization", "Bearer " + kAuthToken);
    request.setHeader("Content-Type", "application/json");
    request.setHeader("Accept", "application/json");
 
@@ -823,3 +848,43 @@ AttachedToolBarMenuItem sAttachment{
 };
 }
 
+BEGIN_EVENT_TABLE(VirtualStudioDialog, wxDialogWrapper)
+   EVT_TEXT( wxID_ANY, VirtualStudioDialog::OnTextChange )
+   EVT_SLIDER(wxID_ANY,VirtualStudioDialog::OnSlider)
+END_EVENT_TABLE();
+
+VirtualStudioDialog::VirtualStudioDialog(wxWindow * parent, wxWindowID id, std::string url, const TranslatableString & title):
+   wxDialogWrapper(parent,id,title,wxDefaultPosition, wxSize(800, 600)),
+   mStyle(wxDEFAULT_DIALOG_STYLE)
+{
+   std::cout << "Yooooo " << url << std::endl;
+   SetName();
+   mBrowser = wxWebView::New(this, wxID_ANY);
+   mBrowser->LoadURL("http://localhost:3000/studios?accessToken=" + kAuthToken);
+   SetSizer(nullptr);
+   DoLayout();
+}
+
+VirtualStudioDialog::~VirtualStudioDialog()
+{
+}
+
+void VirtualStudioDialog::DoLayout()
+{
+   std::cout << "DoLayout" << std::endl;
+   if (mBrowser) {
+      mBrowser->SetSize(GetClientSize());
+   }
+   wxDialogWrapper::DoLayout();
+}
+
+
+void VirtualStudioDialog::OnTextChange(wxCommandEvent &event)
+{
+   std::cout << "OnTextChange" << std::endl;
+}
+
+void VirtualStudioDialog::OnSlider(wxCommandEvent &event)
+{
+   std::cout << "OnSlider" << std::endl;
+}

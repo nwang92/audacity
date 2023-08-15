@@ -31,6 +31,8 @@
 
 
 #include <wx/menu.h>
+#include <wx/webview.h>
+#include <wx/dialog.h>
 #include "ToolBar.h"
 #include "BasicUI.h"
 #include "ProjectFileManager.h"
@@ -41,7 +43,7 @@
 #include "AudacityMessageBox.h"
 #include "../widgets/FileHistory.h"
 
-const std::string kAuthToken = "Bearer xyz";
+const std::string kAuthToken = "xyz";
 
 enum class DeviceChangeMessage : char;
 
@@ -77,6 +79,7 @@ class JackTripToolBar final : public ToolBar {
  private:
    void OnRescannedDevices(DeviceChangeMessage);
    void OnRecording(std::string serverID, int id);
+   void OnWeb(wxCommandEvent& event);
    std::string ExecCommand(const char* cmd);
    bool JackTripExists();
    void GetUserInfo();
@@ -178,6 +181,7 @@ class JackTripToolBar final : public ToolBar {
    };
 
    // Jacktrip-specific options
+   wxWebView* mBrowser;
    std::string mUserID;
    std::unique_ptr<BasicUI::ProgressDialog> mProgressDialog;
    std::map<std::string, std::string> mServerIdToName;
@@ -191,6 +195,29 @@ class JackTripToolBar final : public ToolBar {
  public:
 
    DECLARE_CLASS(JackTripToolBar)
+   DECLARE_EVENT_TABLE()
+};
+
+class VirtualStudioDialog final : public wxDialogWrapper
+{
+ public:
+   VirtualStudioDialog(wxWindow * parent, wxWindowID id,
+                std::string url,
+                const TranslatableString & title);
+   ~VirtualStudioDialog();
+
+   float Get();
+
+ private:
+   void OnSlider(wxCommandEvent &event);
+   void OnTextChange(wxCommandEvent &event);
+   void DoLayout();
+
+   wxWebView* mBrowser;
+   int mStyle;
+   float mValue;
+
+ public:
    DECLARE_EVENT_TABLE()
 };
 

@@ -72,7 +72,7 @@ class wxWidgetsAudacityDependency:
             ("tiff", "off"),
             ("compatibility", 3.0),
             ("secretstore", False), ("opengl", False), ("propgrid", False), ("ribbon", False),
-            ("richtext", False), ("stc", False), ("webview", False), ("help", False),
+            ("richtext", False), ("stc", False), ("webview", True), ("help", False),
             ("html_help", False), ("fs_inet", False), ("protocol", False),
         ]
 
