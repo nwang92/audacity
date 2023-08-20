@@ -155,6 +155,8 @@ jobs:
         ls -la .
 
         OWNER=${{ github.repository_owner }}
+        echo $OWNER
+        echo docker run --volume=$(pwd):/work_dir:rw --rm --network=none ghcr.io/${OWNER,,}/audacity-${{ matrix.config.name }}-build:${{ github.ref_name }}
         docker run --volume=$(pwd):/work_dir:rw --rm --network=none ghcr.io/${OWNER,,}/audacity-${{ matrix.config.name }}-build:${{ github.ref_name }}
     - name: Upload Artifact
       uses: actions/upload-artifact@v2

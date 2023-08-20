@@ -921,9 +921,9 @@ void VirtualStudioAuthDialog::DoLayout()
 
          if (!mUserCode.empty()) {
             s.AddSpace(0, 16, 0);
-            mToken = s.AddTextBox(TranslatableString {}, mUserCode, 60);
-            mToken->SetName(XO("Code").Translation());
-            mToken->Bind(wxEVT_TEXT, [this](auto) { OnTextChange(); });
+            auto textBox = s.AddTextBox(TranslatableString {}, mUserCode, 60);
+            textBox->SetName(XO("Code").Translation());
+            textBox->Bind(wxEVT_TEXT, [this](auto) { OnTextChange(); });
          }
 
          s.AddSpace(0, 16, 0);
@@ -936,19 +936,13 @@ void VirtualStudioAuthDialog::DoLayout()
          {
             s.AddSpace(0, 0, 1);
 
-            s.AddButton(XXO("&Cancel"))
-               ->Bind(wxEVT_BUTTON, [this](auto) { Close(); });
+            auto cancelButton = s.AddButton(XXO("&Cancel"));
+            cancelButton->Bind(wxEVT_BUTTON, [this](auto) { Close(); });
 
-            s.AddButton(XXO("&Sign In"))
-            ->Bind(wxEVT_BUTTON, [this](auto) { OpenVerificationUri(); });
+            auto signInButton = s.AddButton(XXO("&Sign In"));
+            signInButton->Bind(wxEVT_BUTTON, [this](auto) { OpenVerificationUri(); });
 
             s.AddSpace(0, 0, 1);
-
-            /*
-            mContinueButton = s.AddButton(XXO("C&ontinue"));
-            mContinueButton->Disable();
-            mContinueButton->Bind(wxEVT_BUTTON, [this](auto) { OnSlider(); });
-            */
          }
          s.EndHorizontalLay();
       }

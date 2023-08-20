@@ -222,9 +222,6 @@ class VirtualStudioAuthDialog final : public wxDialogWrapper
    void OnSlider();
    void OnTextChange();
 
-   wxButton* mContinueButton { nullptr };
-   wxTextCtrl* mToken { nullptr };
-
    std::string* mParentAccessTokenPtr;
    std::string mIDToken;
    std::string mAccessToken;
