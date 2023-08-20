@@ -866,16 +866,22 @@ AttachedToolBarMenuItem sAttachment{
 };
 }
 
+enum {
+   CancelButtonID = 10000,
+   SignInButtonID,
+   CloseButtonID,
+};
+
 BEGIN_EVENT_TABLE(VirtualStudioAuthDialog, wxDialogWrapper)
-   //EVT_TEXT( wxID_ANY, VirtualStudioAuthDialog::OnTextChange )
-   //EVT_SLIDER(wxID_ANY,VirtualStudioAuthDialog::OnSlider)
+   EVT_BUTTON(CancelButtonID, VirtualStudioAuthDialog::OnClose)
+   EVT_BUTTON(SignInButtonID, VirtualStudioAuthDialog::OnSignIn)
+   EVT_BUTTON(CloseButtonID, VirtualStudioAuthDialog::OnClose)
 END_EVENT_TABLE();
 
 VirtualStudioAuthDialog::VirtualStudioAuthDialog(wxWindow* parent, std::string* parentAccessTokenPtr):
    wxDialogWrapper(parent, wxID_ANY, XO("Login to Virtual Studio"), wxDefaultPosition, { 480, -1 }, wxDEFAULT_DIALOG_STYLE)
 {
    std::cout << "Yoooooo" << std::endl;
-   mParentAccessTokenPtr = parentAccessTokenPtr;
 
    if (mDeviceCode.empty()) {
       InitDeviceAuthorizationCodeFlow(parentAccessTokenPtr);
@@ -923,7 +929,6 @@ void VirtualStudioAuthDialog::DoLayout()
             s.AddSpace(0, 16, 0);
             auto textBox = s.AddTextBox(TranslatableString {}, mUserCode, 60);
             textBox->SetName(XO("Code").Translation());
-            textBox->Bind(wxEVT_TEXT, [this](auto) { OnTextChange(); });
          }
 
          s.AddSpace(0, 16, 0);
@@ -936,11 +941,8 @@ void VirtualStudioAuthDialog::DoLayout()
          {
             s.AddSpace(0, 0, 1);
 
-            auto cancelButton = s.AddButton(XXO("&Cancel"));
-            cancelButton->Bind(wxEVT_BUTTON, [this](auto) { Close(); });
-
-            auto signInButton = s.AddButton(XXO("&Sign In"));
-            signInButton->Bind(wxEVT_BUTTON, [this](auto) { OpenVerificationUri(); });
+            mCancel = s.Id(CancelButtonID).AddButton(XXO("&Cancel"));
+            mSignIn = s.Id(SignInButtonID).AddButton(XXO("&Sign In"));
 
             s.AddSpace(0, 0, 1);
          }
@@ -979,8 +981,7 @@ void VirtualStudioAuthDialog::UpdateLayout()
          {
             s.AddSpace(0, 0, 1);
 
-            auto closeButton = s.AddButton(XXO("&Close"));
-            closeButton->Bind(wxEVT_BUTTON, [this](auto) { Close(); });
+            mClose = s.Id(CloseButtonID).AddButton(XXO("&Close"));
 
             s.AddSpace(0, 0, 1);
          }
@@ -1127,19 +1128,15 @@ void VirtualStudioAuthDialog::CheckForToken(std::string* parentAccessTokenPtr)
    );
 }
 
-void VirtualStudioAuthDialog::OpenVerificationUri() {
+void VirtualStudioAuthDialog::OnSignIn(wxCommandEvent &event)
+{
    if (mVerificationUriComplete.empty()) {
       return;
    }
    BasicUI::OpenInDefaultBrowser(mVerificationUriComplete);
 }
 
-void VirtualStudioAuthDialog::OnTextChange()
+void VirtualStudioAuthDialog::OnClose(wxCommandEvent &event)
 {
-   std::cout << "OnTextChange" << std::endl;
-}
-
-void VirtualStudioAuthDialog::OnSlider()
-{
-   std::cout << "OnSlider" << std::endl;
+   Close();
 }

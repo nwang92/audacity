@@ -38,7 +38,7 @@
 #include "TempDirectory.h"
 #include "Observer.h"
 #include "MemoryX.h"
-#include "../widgets/MeterPanel.h"
+//#include "../widgets/MeterPanel.h"
 #include "AudacityMessageBox.h"
 #include "../widgets/FileHistory.h"
 
@@ -52,6 +52,8 @@ enum class DeviceChangeMessage : char;
 
 class wxMenu;
 class wxString;
+class wxButton;
+class wxTextCtrl;
 class VirtualStudioAuthDialog;
 struct DeviceSourceMap;
 
@@ -127,7 +129,6 @@ class JackTripToolBar final : public ToolBar {
    FILE *mExec;
    std::vector<std::string> mInputDevices{};
    std::vector<std::string> mOutputDevices{};
-   MeterPanel *mStudioMeter{nullptr};
 
    class JackTripChoices {
    public:
@@ -218,12 +219,13 @@ class VirtualStudioAuthDialog final : public wxDialogWrapper
    void StartPolling(std::string* parentAccessTokenPtr);
    void CheckForToken(std::string* parentAccessTokenPtr);
 
-   void OpenVerificationUri();
+   void OnSignIn(wxCommandEvent &event);
+   void OnClose(wxCommandEvent &event);
 
-   void OnSlider();
-   void OnTextChange();
+   wxButton *mCancel;
+   wxButton *mSignIn;
+   wxButton *mClose;
 
-   std::string* mParentAccessTokenPtr;
    std::string mIDToken;
    std::string mAccessToken;
    std::string mRefreshToken;
