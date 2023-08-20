@@ -101,6 +101,7 @@ env:
   CONFIGURATION_TYPES: ${{ (inputs && inputs.configuration_types) || (github.event.inputs && github.event.inputs.configuration_types) || 'RelWithDebInfo' }}
 
   CONFIGURE_CMAKE_OPTIONS: |
+    -Daudacity_has_networking=yes
     -Daudacity_has_url_schemes_support=On
     -Daudacity_has_audiocom_upload=On
     ${{ (inputs && inputs.configure_cmake_options) || (github.event.inputs && github.event.inputs.configure_cmake_options) || '' }}
