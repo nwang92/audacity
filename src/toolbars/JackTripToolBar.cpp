@@ -15,6 +15,7 @@
 #include "ToolManager.h"
 
 #include <thread>
+#include <chrono>
 
 #include <wx/app.h>
 #include <wx/log.h>
@@ -25,8 +26,15 @@
 #include <wx/wfstream.h>
 #include <wx/dir.h>
 #include <wx/filename.h>
+#include <wx/dialog.h>
+#include <wx/statline.h>
+
+#include "wxPanelWrapper.h"
 
 #include "../ActiveProject.h"
+
+#include "ShuttleGui.h"
+#include "MultipartData.h"
 
 #include "AColor.h"
 #include "AllThemeResources.h"
@@ -263,23 +271,23 @@ void JackTripToolBar::OnAudioSetup(wxCommandEvent& WXUNUSED(evt))
 {
    wxMenu menu;
 
-   for (auto it = mServerIdToRecordings.begin(); it != mServerIdToRecordings.end(); it++) {
-      auto serverID = it->first;
-      if (serverID != "") {
-         auto name = mServerIdToName[serverID];
-         JackTripChoices c = it->second;
-         c.AppendSubMenu(*this, menu, serverID,
-            &JackTripToolBar::OnRecording, _("&" + name));
-         menu.AppendSeparator();
+   if (mUserID.empty() || mAccessToken.empty()) {
+      menu.Append(kAudioSettings, _("&Login"));
+
+      menu.Bind(wxEVT_MENU_CLOSE, [this](auto&) { mJackTrip->PopUp(); });
+      menu.Bind(wxEVT_MENU, &JackTripToolBar::OnAuth, this, kAudioSettings);
+   } else {
+      for (auto it = mServerIdToRecordings.begin(); it != mServerIdToRecordings.end(); it++) {
+         auto serverID = it->first;
+         if (serverID != "") {
+            auto name = mServerIdToName[serverID];
+            JackTripChoices c = it->second;
+            c.AppendSubMenu(*this, menu, serverID,
+               &JackTripToolBar::OnRecording, _("&" + name));
+            menu.AppendSeparator();
+         }
       }
    }
-
-   /*
-   menu.Append(kAudioSettings, _("&Audio Settings..."));
-
-   menu.Bind(wxEVT_MENU_CLOSE, [this](auto&) { mJackTrip->PopUp(); });
-   menu.Bind(wxEVT_MENU, &JackTripToolBar::OnSettings, this, kAudioSettings);
-   */
 
    wxWindow* btn = FindWindow(ID_JACKTRIP_BUTTON);
    wxRect r = btn->GetRect();
@@ -363,10 +371,14 @@ void JackTripToolBar::RepopulateMenus()
 
 void JackTripToolBar::GetUserInfo()
 {
+   if (mAccessToken.empty()) {
+      return;
+   }
+
    mUserID.clear();
 
    audacity::network_manager::Request request("https://auth.jacktrip.org/userinfo");
-   request.setHeader("Authorization", kAuthToken);
+   request.setHeader("Authorization", "Bearer " + mAccessToken);
    request.setHeader("Content-Type", "application/json");
    request.setHeader("Accept", "application/json");
 
@@ -403,7 +415,7 @@ void JackTripToolBar::GetUserInfo()
 
 void JackTripToolBar::FillRecordings()
 {
-   if (mUserID.empty()) {
+   if (mUserID.empty() || mAccessToken.empty()) {
       return;
    }
    mServerIdToName.clear();
@@ -411,7 +423,7 @@ void JackTripToolBar::FillRecordings()
    mServerIdToRecordings.clear();
 
    audacity::network_manager::Request request("https://app.jacktrip.org/api/users/" + mUserID + "/recordings");
-   request.setHeader("Authorization", kAuthToken);
+   request.setHeader("Authorization", "Bearer " + mAccessToken);
    request.setHeader("Content-Type", "application/json");
    request.setHeader("Accept", "application/json");
 
@@ -534,6 +546,34 @@ void JackTripToolBar::OnRecording(std::string serverID, int id)
    GetRecordingDownloadURL(serverID, recordingID);
 }
 
+void JackTripToolBar::OnAuth(wxCommandEvent& event)
+{
+   std::cout << "Clicked on web menu item" << std::endl;
+
+   VirtualStudioAuthDialog dlg(this, &mAccessToken);
+   dlg.SetSize(800, 600);
+   int retCode = dlg.ShowModal();
+
+   dlg.Center();
+   std::cout << "Return code: " << retCode << std::endl;
+
+   std::cout << "Parent access token: " << mAccessToken << std::endl;
+   if (!mAccessToken.empty()) {
+      GetUserInfo();
+   }
+   /*
+   wxTheApp->CallAfter([this]{
+      mBrowser = wxWebView::New(this, wxID_ANY);
+      mBrowser->LoadURL("https://www.audacityteam.org");
+      wxDialogWrapper webDialog(this, wxID_ANY, XO("Virtual Studio"));
+      webDialog.SetTitle("Audacity Website");
+      webDialog.SetChild(mBrowser);
+      webDialog.SetSize(600, 400);
+      webDialog.ShowModal();
+   });
+   */
+}
+
 std::string JackTripToolBar::ExecCommand(const char* cmd)
 {
    std::array<char, 128> buffer;
@@ -574,9 +614,12 @@ void JackTripToolBar::StopJackTrip()
 
 void JackTripToolBar::GetRecordingDownloadURL(std::string serverID, std::string recordingID)
 {
+   if (mAccessToken.empty()) {
+      return;
+   }
    std::string url = "https://app.jacktrip.org/api/servers/" + serverID + "/recordings/" + recordingID + "/download";
    audacity::network_manager::Request request(url);
-   request.setHeader("Authorization", kAuthToken);
+   request.setHeader("Authorization", "Bearer " + mAccessToken);
    request.setHeader("Content-Type", "application/json");
    request.setHeader("Accept", "application/json");
 
@@ -823,3 +866,286 @@ AttachedToolBarMenuItem sAttachment{
 };
 }
 
+BEGIN_EVENT_TABLE(VirtualStudioAuthDialog, wxDialogWrapper)
+   //EVT_TEXT( wxID_ANY, VirtualStudioAuthDialog::OnTextChange )
+   //EVT_SLIDER(wxID_ANY,VirtualStudioAuthDialog::OnSlider)
+END_EVENT_TABLE();
+
+VirtualStudioAuthDialog::VirtualStudioAuthDialog(wxWindow* parent, std::string* parentAccessTokenPtr):
+   wxDialogWrapper(parent, wxID_ANY, XO("Login to Virtual Studio"), wxDefaultPosition, { 480, -1 }, wxDEFAULT_DIALOG_STYLE)
+{
+   std::cout << "Yoooooo" << std::endl;
+   mParentAccessTokenPtr = parentAccessTokenPtr;
+
+   if (mDeviceCode.empty()) {
+      InitDeviceAuthorizationCodeFlow(parentAccessTokenPtr);
+   }
+}
+
+VirtualStudioAuthDialog::~VirtualStudioAuthDialog()
+{
+   std::cout << "VirtualStudioAuthDialog destrutctor called" << std::endl;
+
+   mIDToken = "";
+   mAccessToken = "";
+   mRefreshToken = "";
+
+   mDeviceCode = "";
+   mUserCode = "";
+   mVerificationUri = "";
+   mVerificationUriComplete = "";
+   mPollingInterval = 0;
+   mExpiresIn = 0;
+
+   mError = false;
+   mSuccess = false;
+}
+
+void VirtualStudioAuthDialog::DoLayout()
+{
+   ShuttleGui s(this, eIsCreating);
+
+   s.StartVerticalLay();
+   {
+      s.StartInvisiblePanel(16);
+      {
+         s.SetBorder(0);
+         s.AddSpace(0, 16, 0);
+         s.AddTitle(XO("JackTrip"));
+
+         s.AddSpace(0, 4, 0);
+         s.AddTitle(XO("Virtual Studio"));
+
+         s.AddSpace(0, 16, 0);
+         s.AddTitle(XO("Please sign in and confirm the following code using your web browser. Return here when you are done."));
+
+         if (!mUserCode.empty()) {
+            s.AddSpace(0, 16, 0);
+            mToken = s.AddTextBox(TranslatableString {}, mUserCode, 60);
+            mToken->SetName(XO("Code").Translation());
+            mToken->Bind(wxEVT_TEXT, [this](auto) { OnTextChange(); });
+         }
+
+         s.AddSpace(0, 16, 0);
+
+         s.AddWindow(safenew wxStaticLine { s.GetParent() }, wxEXPAND);
+
+         s.AddSpace(0, 10, 0);
+
+         s.StartHorizontalLay(wxEXPAND, 0);
+         {
+            s.AddSpace(0, 0, 1);
+
+            s.AddButton(XXO("&Cancel"))
+               ->Bind(wxEVT_BUTTON, [this](auto) { Close(); });
+
+            s.AddButton(XXO("&Sign In"))
+            ->Bind(wxEVT_BUTTON, [this](auto) { OpenVerificationUri(); });
+
+            s.AddSpace(0, 0, 1);
+
+            /*
+            mContinueButton = s.AddButton(XXO("C&ontinue"));
+            mContinueButton->Disable();
+            mContinueButton->Bind(wxEVT_BUTTON, [this](auto) { OnSlider(); });
+            */
+         }
+         s.EndHorizontalLay();
+      }
+      s.EndInvisiblePanel();
+   }
+   s.EndVerticalLay();
+
+   Layout();
+   Fit();
+   Centre();
+}
+
+void VirtualStudioAuthDialog::UpdateLayout()
+{
+   ShuttleGui s(this, eIsCreating);
+
+   wxWindowList children = s.GetParent()->GetChildren();
+   for (auto child : children) {
+      child->Show(false);
+   }
+
+   s.StartVerticalLay();
+   {
+      s.StartInvisiblePanel(16);
+      {
+         s.SetBorder(0);
+         s.AddSpace(0, 16, 0);
+         s.AddTitle(XO("Success"));
+         s.AddSpace(0, 8, 0);
+         s.AddTitle(XO("Close this window and re-open the JackTrip menu button to import Virtual Studio recordings"));
+         s.AddSpace(0, 16, 0);
+
+         s.StartHorizontalLay(wxEXPAND, 0);
+         {
+            s.AddSpace(0, 0, 1);
+
+            s.AddButton(XXO("&Close"))
+               ->Bind(wxEVT_BUTTON, [this](auto) { Close(); });
+
+            s.AddSpace(0, 0, 1);
+         }
+         s.EndHorizontalLay();
+
+         s.AddSpace(0, 16, 0);
+      }
+      s.EndInvisiblePanel();
+   }
+   s.EndVerticalLay();
+
+   Layout();
+   Fit();
+   Centre();
+}
+
+void VirtualStudioAuthDialog::InitDeviceAuthorizationCodeFlow(std::string* parentAccessTokenPtr)
+{
+   // prepare request for device authorization code
+   audacity::network_manager::Request request("https://" + kAuthHost + "/oauth/device/code");
+   request.setHeader("Content-Type", "application/x-www-form-urlencoded");
+   request.setHeader("Accept", "application/json");
+
+   // create payload
+   std::string data = "client_id=" + kAuthClientId + "&scope=openid profile email offline_access read:servers&audience=" + kAuthAudience;
+
+   auto response = audacity::network_manager::NetworkManager::GetInstance().doPost(request, data.data(), data.size());
+   response->setRequestFinishedCallback(
+      [response, parentAccessTokenPtr, this](auto)
+      {
+         const auto httpCode = response->getHTTPCode();
+         std::cout << "InitDeviceAuthorizationCodeFlow HTTP code: " << httpCode << std::endl;
+
+         if (httpCode != 200) {
+            mDeviceCode = "";
+            mError = true;
+            return;
+         }
+
+         const auto body = response->readAll<std::string>();
+
+         using namespace rapidjson;
+
+         Document document;
+         document.Parse(body.data(), body.size());
+
+         // Check for parse errors
+         if (document.HasParseError()) {
+            mDeviceCode = "";
+            mError = true;
+            std::cout << "Error parsing JSON: " << document.GetParseError() << std::endl;
+            return;
+         }
+
+         mDeviceCode = document["device_code"].GetString();
+         mUserCode = document["user_code"].GetString();
+         mVerificationUri = document["verification_uri"].GetString();
+         mVerificationUriComplete = document["verification_uri_complete"].GetString();
+         mPollingInterval = document["interval"].GetInt();
+         mExpiresIn = document["expires_in"].GetInt();
+
+         std::cout << "Device code: " << mDeviceCode << std::endl;
+         std::cout << "User code: " << mUserCode << std::endl;
+         std::cout << "Verification URI: " << mVerificationUri << std::endl;
+         std::cout << "Verification URI complete: " << mVerificationUriComplete << std::endl;
+         std::cout << "Polling interval: " << mPollingInterval << std::endl;
+         std::cout << "Expires in: " << mExpiresIn << std::endl;
+
+         wxTheApp->CallAfter([this]{ DoLayout(); });
+         StartPolling(parentAccessTokenPtr);
+      }
+   );
+}
+
+void VirtualStudioAuthDialog::StartPolling(std::string* parentAccessTokenPtr)
+{
+   mExpiresIn -= mPollingInterval;
+   if (mPollingInterval <= 0 || mExpiresIn <= 0) {
+      std::cout << "Stopped polling" << std::endl;
+      return;
+   }
+
+   std::this_thread::sleep_for(std::chrono::seconds(mPollingInterval));
+   if (mIDToken.empty() || mAccessToken.empty() || mRefreshToken.empty()) {
+      CheckForToken(parentAccessTokenPtr);
+      StartPolling(parentAccessTokenPtr);
+   }
+}
+
+void VirtualStudioAuthDialog::CheckForToken(std::string* parentAccessTokenPtr)
+{
+   if (mDeviceCode.empty()) return;
+
+   // prepare request for device authorization code
+   audacity::network_manager::Request request("https://" + kAuthHost + "/oauth/token");
+   request.setHeader("Content-Type", "application/x-www-form-urlencoded");
+   request.setHeader("Accept", "application/json");
+
+   // create payload
+   std::string data = "client_id=" + kAuthClientId + "&grant_type=urn:ietf:params:oauth:grant-type:device_code&device_code=" + mDeviceCode;
+
+   auto response = audacity::network_manager::NetworkManager::GetInstance().doPost(request, data.data(), data.size());
+   response->setRequestFinishedCallback(
+      [response, parentAccessTokenPtr, this](auto)
+      {
+         const auto httpCode = response->getHTTPCode();
+         std::cout << "CheckForToken HTTP code: " << httpCode << std::endl;
+
+         if (httpCode != 200) {
+            return;
+         }
+
+         const auto body = response->readAll<std::string>();
+
+         using namespace rapidjson;
+
+         Document document;
+         document.Parse(body.data(), body.size());
+
+         // Check for parse errors
+         if (document.HasParseError()) {
+            std::cout << "Error parsing JSON: " << document.GetParseError() << std::endl;
+            return;
+         }
+
+         mIDToken = document["id_token"].GetString();
+         mAccessToken = document["access_token"].GetString();
+         mRefreshToken = document["refresh_token"].GetString();
+         *parentAccessTokenPtr = document["access_token"].GetString();
+
+         if (mIDToken.empty() || mAccessToken.empty() || mRefreshToken.empty()) {
+            return;
+         }
+
+         std::cout << "ID token: " << mIDToken << std::endl;
+         std::cout << "Access token: " << mAccessToken << std::endl;
+         std::cout << "Refresh token: " << mRefreshToken << std::endl;
+         mError = false;
+         mSuccess = true;
+         mPollingInterval = 0;
+         mExpiresIn = 0;
+         wxTheApp->CallAfter([this]{ UpdateLayout(); });
+      }
+   );
+}
+
+void VirtualStudioAuthDialog::OpenVerificationUri() {
+   if (mVerificationUriComplete.empty()) {
+      return;
+   }
+   BasicUI::OpenInDefaultBrowser(mVerificationUriComplete);
+}
+
+void VirtualStudioAuthDialog::OnTextChange()
+{
+   std::cout << "OnTextChange" << std::endl;
+}
+
+void VirtualStudioAuthDialog::OnSlider()
+{
+   std::cout << "OnSlider" << std::endl;
+}

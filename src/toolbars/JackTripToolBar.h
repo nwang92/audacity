@@ -31,6 +31,7 @@
 
 
 #include <wx/menu.h>
+#include <wx/dialog.h>
 #include "ToolBar.h"
 #include "BasicUI.h"
 #include "ProjectFileManager.h"
@@ -41,7 +42,11 @@
 #include "AudacityMessageBox.h"
 #include "../widgets/FileHistory.h"
 
-const std::string kAuthToken = "Bearer xyz";
+const std::string kAuthAuthorizeUrl = "https://auth.jacktrip.org/authorize";
+const std::string kAuthTokenUrl = "https://auth.jacktrip.org/oauth/token";
+const std::string kAuthAudience = "https://api.jacktrip.org";
+const std::string kAuthClientId = "cROUJag0UVKDaJ6jRAKRzlVjKVFNU39I";
+const std::string kAuthHost = "auth.jacktrip.org";
 
 enum class DeviceChangeMessage : char;
 
@@ -77,6 +82,7 @@ class JackTripToolBar final : public ToolBar {
  private:
    void OnRescannedDevices(DeviceChangeMessage);
    void OnRecording(std::string serverID, int id);
+   void OnAuth(wxCommandEvent& event);
    std::string ExecCommand(const char* cmd);
    bool JackTripExists();
    void GetUserInfo();
@@ -178,6 +184,7 @@ class JackTripToolBar final : public ToolBar {
    };
 
    // Jacktrip-specific options
+   std::string mAccessToken;
    std::string mUserID;
    std::unique_ptr<BasicUI::ProgressDialog> mProgressDialog;
    std::map<std::string, std::string> mServerIdToName;
@@ -191,6 +198,50 @@ class JackTripToolBar final : public ToolBar {
  public:
 
    DECLARE_CLASS(JackTripToolBar)
+   DECLARE_EVENT_TABLE()
+};
+
+class VirtualStudioAuthDialog final : public wxDialogWrapper
+{
+ public:
+   VirtualStudioAuthDialog(wxWindow* parent, std::string* parentAccessTokenPtr);
+   ~VirtualStudioAuthDialog();
+
+   float Get();
+
+ private:
+   void DoLayout();
+   void UpdateLayout();
+
+   void InitDeviceAuthorizationCodeFlow(std::string* parentAccessTokenPtr);
+   void StartPolling(std::string* parentAccessTokenPtr);
+   void CheckForToken(std::string* parentAccessTokenPtr);
+
+   void OpenVerificationUri();
+
+   void OnSlider();
+   void OnTextChange();
+
+   wxButton* mContinueButton { nullptr };
+   wxTextCtrl* mToken { nullptr };
+
+   std::string* mParentAccessTokenPtr;
+   std::string mIDToken;
+   std::string mAccessToken;
+   std::string mRefreshToken;
+   std::string mDeviceCode;
+   std::string mUserCode;
+   std::string mVerificationUri;
+   std::string mVerificationUriComplete;
+   int mPollingInterval;
+   int mExpiresIn;
+
+   bool mError;
+   bool mSuccess;
+   int mStyle;
+   float mValue;
+
+ public:
    DECLARE_EVENT_TABLE()
 };
 
