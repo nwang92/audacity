@@ -52,6 +52,7 @@ enum class DeviceChangeMessage : char;
 
 class wxMenu;
 class wxString;
+class VirtualStudioAuthDialog;
 struct DeviceSourceMap;
 
 class JackTripToolBar final : public ToolBar {

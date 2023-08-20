@@ -979,8 +979,8 @@ void VirtualStudioAuthDialog::UpdateLayout()
          {
             s.AddSpace(0, 0, 1);
 
-            s.AddButton(XXO("&Close"))
-               ->Bind(wxEVT_BUTTON, [this](auto) { Close(); });
+            auto closeButton = s.AddButton(XXO("&Close"));
+            closeButton->Bind(wxEVT_BUTTON, [this](auto) { Close(); });
 
             s.AddSpace(0, 0, 1);
          }
