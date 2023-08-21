@@ -926,8 +926,7 @@ void VirtualStudioAuthDialog::DoLayout()
 
          if (!mUserCode.empty()) {
             s.AddSpace(0, 16, 0);
-            auto textBox = s.AddTextBox(TranslatableString {}, mUserCode, 60);
-            textBox->SetName(XO("Code").Translation());
+            s.AddTextBox(TranslatableString {}, mUserCode, 60);
          }
 
          s.AddSpace(0, 16, 0);

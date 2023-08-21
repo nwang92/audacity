@@ -53,7 +53,6 @@ enum class DeviceChangeMessage : char;
 class wxMenu;
 class wxString;
 class wxButton;
-class wxTextCtrl;
 class VirtualStudioAuthDialog;
 struct DeviceSourceMap;
 
