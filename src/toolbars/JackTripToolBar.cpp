@@ -575,8 +575,9 @@ void JackTripToolBar::OnAuth(wxCommandEvent& event)
 
 std::string JackTripToolBar::ExecCommand(const char* cmd)
 {
-   std::array<char, 128> buffer;
+   //std::array<char, 128> buffer;
    std::string result;
+   /*
    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
    if (!pipe) {
       throw std::runtime_error("popen() failed!");
@@ -584,6 +585,7 @@ std::string JackTripToolBar::ExecCommand(const char* cmd)
    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
       result += buffer.data();
    }
+   */
    return result;
 }
 
@@ -597,18 +599,22 @@ bool JackTripToolBar::JackTripExists()
 
 void JackTripToolBar::RunJackTrip()
 {
+   /*
    if (mExec) {
       throw std::runtime_error("JackTrip instance is already running");
    }
    const char* cmd = "jacktrip -R -C 54.219.88.160 -z -t --bufstrategy 3 -q auto --srate 48000 --bufsize 128 --audiodevice \"Generic: Yeti Stereo Microphone\"";
    mExec = popen(cmd, "r");
+   */
 }
 
 void JackTripToolBar::StopJackTrip()
 {
+   /*
    if (mExec) {
       pclose(mExec);
    }
+   */
 }
 
 void JackTripToolBar::GetRecordingDownloadURL(std::string serverID, std::string recordingID)

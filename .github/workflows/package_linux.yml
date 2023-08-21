@@ -46,8 +46,13 @@ on:
 env:
   BUILD_LEVEL: ${{ (inputs && inputs.build_level) || (github.event.inputs && github.event.inputs.build_level) || ((startsWith(github.ref, 'refs/heads/release-') && 'beta') || 'alpha') }}
   BUILD_TYPE: ${{ (inputs && inputs.build_type) || (github.event.inputs && github.event.inputs.build_type) || 'Release' }}
-  CMAKE_OPTIONS: ${{ (inputs && inputs.cmake_options) || (github.event.inputs && github.event.inputs.cmake_options) || '' }}
   OWNER: ${{ github.repository_owner }}
+  CMAKE_OPTIONS: |
+    -Daudacity_has_networking=yes
+    -Daudacity_has_url_schemes_support=On
+    -Daudacity_has_audiocom_upload=On
+    ${{ (inputs && inputs.cmake_options) || (github.event.inputs && github.event.inputs.cmake_options) || '' }}
+
 
 jobs:
   generate_source_tarball:
