@@ -461,7 +461,6 @@ void JackTripToolBar::FillRecordings()
 
          // Iterate over the array of objects
          Value::ConstValueIterator itr;
-         JackTripChoices recordings;
          std::map<std::string, wxArrayStringEx> recordingNamesByServerID;
          std::map<std::string, wxArrayStringEx> recordingIdsByServerID;
          for (itr = document.Begin(); itr != document.End(); ++itr) {
@@ -497,17 +496,18 @@ void JackTripToolBar::AppendSubMenu(JackTripToolBar &toolbar,
    int ii = 0;
    for (const auto &label : labels) {
       // Assign fresh ID with wxID_ANY
-      auto subMenuItem = subMenu->AppendRadioItem(wxID_ANY, label);
-      if (ii == checkedItem)
-         subMenuItem->Check();
+      auto subMenuItem = subMenu->AppendCheckItem(wxID_ANY, label);
+      //if (ii == checkedItem)
+      subMenuItem->Check(false);
+      subMenuItem->Enable(true);
       subMenu->Bind(wxEVT_MENU,
          [&toolbar, serverID, callback, ii](wxCommandEvent &){ (toolbar.*callback)(serverID, ii); },
          subMenuItem->GetId());
       ++ii;
    }
    auto menuItem = menu.AppendSubMenu(subMenu.release(), title);
-   if (checkedItem < 0)
-      menuItem->Enable(false);
+   //if (checkedItem < 0)
+   //   menuItem->Enable(false);
 }
 
 void JackTripToolBar::JackTripChoices::AppendSubMenu(JackTripToolBar &toolBar,
@@ -933,6 +933,8 @@ void VirtualStudioAuthDialog::DoLayout()
             s.AddSpace(0, 0, 1);
          }
          s.EndHorizontalLay();
+
+         s.AddSpace(0, 16, 0);
       }
       s.EndInvisiblePanel();
    }
