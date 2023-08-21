@@ -386,7 +386,7 @@ void JackTripToolBar::GetUserInfo()
       [response, this](auto)
       {
          const auto httpCode = response->getHTTPCode();
-         std::cout << "HTTP code: " << httpCode << std::endl;
+         wxLogInfo("GetUserInfo HTTP code: %d", httpCode);
 
          if (httpCode != 200)
             return;
@@ -399,13 +399,13 @@ void JackTripToolBar::GetUserInfo()
 
          // Check for parse errors
          if (document.HasParseError()) {
-            std::cout << "Error parsing JSON: " << document.GetParseError() << std::endl;
+            wxLogInfo("Error parsing JSON: %s", document.GetParseError());
             wxTheApp->CallAfter([this]{ mProgressDialog.reset(); });
             return;
          }
 
          auto sub = document["sub"].GetString();
-         std::cout << "sub is: " << sub << std::endl;
+         wxLogInfo("Sub: %s", sub);
          mUserID = sub;
          RepopulateMenus();
       }
@@ -431,7 +431,7 @@ void JackTripToolBar::FillRecordings()
       [response, this](auto)
       {
          const auto httpCode = response->getHTTPCode();
-         std::cout << "HTTP code: " << httpCode << std::endl;
+         wxLogInfo("FillRecordings HTTP code: %d", httpCode);
 
          if (httpCode != 200)
             return;
@@ -445,7 +445,7 @@ void JackTripToolBar::FillRecordings()
 
          // Check for parse errors
          if (document.HasParseError()) {
-            std::cout << "Error parsing JSON: " << document.GetParseError() << std::endl;
+            wxLogInfo("Error parsing JSON: %s", document.GetParseError());
             return;
          }
 
@@ -525,9 +525,10 @@ void JackTripToolBar::OnRescannedDevices(DeviceChangeMessage m)
 
 void JackTripToolBar::OnRecording(std::string serverID, int id)
 {
-   std::cout << "Clicked on recording: " << id << " for serverID: " << serverID << std::endl;
+   wxLogInfo("Clicked on recording %d for serverID %s", id, serverID);
+
    if (mServerIdToRecordings.find(serverID) == mServerIdToRecordings.end()) {
-      std::cout << "Key not found" << std::endl;
+      wxLogInfo("Key %s not found", serverID);
       return;
    }
 
@@ -537,7 +538,7 @@ void JackTripToolBar::OnRecording(std::string serverID, int id)
    // do nothing if the directory exists - this should mean we already have the files locally
    auto outputDir = GetDownloadLocalDir(recordingID);
    if (wxDirExists(outputDir)) {
-      std::cout << "Directory exists " << outputDir << std::endl;
+      wxLogInfo("Directory exists: %s", outputDir);
       ImportRecordingFiles(recordingID);
       return;
    }
@@ -547,30 +548,16 @@ void JackTripToolBar::OnRecording(std::string serverID, int id)
 
 void JackTripToolBar::OnAuth(wxCommandEvent& event)
 {
-   std::cout << "Clicked on web menu item" << std::endl;
-
    VirtualStudioAuthDialog dlg(this, &mAccessToken);
    dlg.SetSize(800, 600);
    int retCode = dlg.ShowModal();
 
    dlg.Center();
-   std::cout << "Return code: " << retCode << std::endl;
 
-   std::cout << "Parent access token: " << mAccessToken << std::endl;
+   wxLogInfo("Parent access token: %s", mAccessToken);
    if (!mAccessToken.empty()) {
       GetUserInfo();
    }
-   /*
-   wxTheApp->CallAfter([this]{
-      mBrowser = wxWebView::New(this, wxID_ANY);
-      mBrowser->LoadURL("https://www.audacityteam.org");
-      wxDialogWrapper webDialog(this, wxID_ANY, XO("Virtual Studio"));
-      webDialog.SetTitle("Audacity Website");
-      webDialog.SetChild(mBrowser);
-      webDialog.SetSize(600, 400);
-      webDialog.ShowModal();
-   });
-   */
 }
 
 std::string JackTripToolBar::ExecCommand(const char* cmd)
@@ -635,10 +622,9 @@ void JackTripToolBar::GetRecordingDownloadURL(std::string serverID, std::string 
       [response, this](auto)
       {
          const auto httpCode = response->getHTTPCode();
-         std::cout << "HTTP code: " << httpCode << std::endl;
+         wxLogInfo("GetRecordingDownloadURL HTTP code: %d", httpCode);
 
          if (httpCode != 200) {
-            std::cout << "bad http code" << std::endl;
             wxTheApp->CallAfter([this]{ mProgressDialog.reset(); });
             wxTheApp->CallAfter([] {BasicUI::ShowErrorDialog( {},
                                   XC("Error downloading recording", "Virtual Studio"),
@@ -657,14 +643,14 @@ void JackTripToolBar::GetRecordingDownloadURL(std::string serverID, std::string 
 
          // Check for parse errors
          if (document.HasParseError()) {
-            std::cout << "Error parsing JSON: " << document.GetParseError() << std::endl;
+            wxLogInfo("Error parsing JSON: %s", document.GetParseError());
             wxTheApp->CallAfter([this]{ mProgressDialog.reset(); });
             return;
          }
 
          auto downloadLink = document["url"].GetString();
          if (downloadLink) {
-            std::cout << downloadLink << std::endl;
+            wxLogInfo("Got download link: %s", downloadLink);
             DownloadRecording(downloadLink);
          }
       }
@@ -701,7 +687,7 @@ void JackTripToolBar::DownloadRecording(std::string url)
 
    // do nothing if the directory exists - this should mean we already have the files locally
    if (wxDirExists(outputDir)) {
-      std::cout << "Directory exists " << outputDir << std::endl;
+      wxLogInfo("Directory exists: %s", outputDir);
       wxTheApp->CallAfter([this]{ mProgressDialog.reset(); });
       ImportRecordingFiles(recordingID);
       return;
@@ -710,7 +696,7 @@ void JackTripToolBar::DownloadRecording(std::string url)
 
    mDownloadFile = wxFileName(outputDir, downloadFilename).GetFullPath().ToStdString();
    mDownloadOutput.open(mDownloadFile, std::ios::binary);
-   std::cout << "Downloading to " << mDownloadFile << std::endl;
+   wxLogInfo("Downloading to: %s", mDownloadFile);
 
    // issue request
    audacity::network_manager::Request request(url);
@@ -723,7 +709,7 @@ void JackTripToolBar::DownloadRecording(std::string url)
       if (mDownloadOutput.is_open()) {
          mDownloadOutput.close();
       }
-      std::cout << "done" << std::endl;
+      wxLogInfo("Download complete");
 
       if (response->getError() != audacity::network_manager::NetworkError::NoError) {
          AudacityMessageBox( XO("Error downloading file") );
@@ -762,7 +748,7 @@ void JackTripToolBar::ExtractRecording(std::string recordingID)
 
    // determine where to save the extracted files
    auto outputDir = GetDownloadLocalDir(recordingID);
-   std::cout << "Extracting to " << outputDir << std::endl;
+   wxLogInfo("Extracting to: %s", outputDir);
 
    wxFileInputStream in(mDownloadFile);
    wxZipInputStream zis(in);
@@ -807,7 +793,7 @@ void JackTripToolBar::ExtractRecording(std::string recordingID)
    }
 
    wxRemoveFile(mDownloadFile);
-   std::cout << "Done extracting: " << outputDir << std::endl;
+   wxLogInfo("Done extracting: %s", outputDir);
    ImportRecordingFiles(recordingID);
 }
 
@@ -822,7 +808,7 @@ void JackTripToolBar::ImportRecordingFiles(std::string recordingID)
       while (cont) {
          wxFileName file(filename);
          if (file.GetExt() == "flac") {
-            std::cout << "Found file: " << filename << std::endl;
+            wxLogInfo("Found file: %s", filename);
             // TODO: This doesn't work yet, need to figure out how to actually import the file
             wxTheApp->CallAfter([outputDir, filename, this]{
                bool success = ProjectFileManager::Get( mProject ).Import(outputDir + wxFileName::GetPathSeparator() + filename, false);
@@ -886,8 +872,6 @@ END_EVENT_TABLE();
 VirtualStudioAuthDialog::VirtualStudioAuthDialog(wxWindow* parent, std::string* parentAccessTokenPtr):
    wxDialogWrapper(parent, wxID_ANY, XO("Login to Virtual Studio"), wxDefaultPosition, { 480, -1 }, wxDEFAULT_DIALOG_STYLE)
 {
-   std::cout << "Yoooooo" << std::endl;
-
    if (mDeviceCode.empty()) {
       InitDeviceAuthorizationCodeFlow(parentAccessTokenPtr);
    }
@@ -895,8 +879,6 @@ VirtualStudioAuthDialog::VirtualStudioAuthDialog(wxWindow* parent, std::string* 
 
 VirtualStudioAuthDialog::~VirtualStudioAuthDialog()
 {
-   std::cout << "VirtualStudioAuthDialog destrutctor called" << std::endl;
-
    mIDToken = "";
    mAccessToken = "";
    mRefreshToken = "";
@@ -1017,7 +999,7 @@ void VirtualStudioAuthDialog::InitDeviceAuthorizationCodeFlow(std::string* paren
       [response, parentAccessTokenPtr, this](auto)
       {
          const auto httpCode = response->getHTTPCode();
-         std::cout << "InitDeviceAuthorizationCodeFlow HTTP code: " << httpCode << std::endl;
+         wxLogInfo("InitDeviceAuthorizationCodeFlow HTTP code: %d", httpCode);
 
          if (httpCode != 200) {
             mDeviceCode = "";
@@ -1036,7 +1018,7 @@ void VirtualStudioAuthDialog::InitDeviceAuthorizationCodeFlow(std::string* paren
          if (document.HasParseError()) {
             mDeviceCode = "";
             mError = true;
-            std::cout << "Error parsing JSON: " << document.GetParseError() << std::endl;
+            wxLogInfo("Error parsing JSON: %s", document.GetParseError());
             return;
          }
 
@@ -1092,7 +1074,7 @@ void VirtualStudioAuthDialog::CheckForToken(std::string* parentAccessTokenPtr)
       [response, parentAccessTokenPtr, this](auto)
       {
          const auto httpCode = response->getHTTPCode();
-         std::cout << "CheckForToken HTTP code: " << httpCode << std::endl;
+         wxLogInfo("CheckForToken HTTP code: %d", httpCode);
 
          if (httpCode != 200) {
             return;
@@ -1107,7 +1089,7 @@ void VirtualStudioAuthDialog::CheckForToken(std::string* parentAccessTokenPtr)
 
          // Check for parse errors
          if (document.HasParseError()) {
-            std::cout << "Error parsing JSON: " << document.GetParseError() << std::endl;
+            wxLogInfo("Error parsing JSON: %s", document.GetParseError());
             return;
          }
 
