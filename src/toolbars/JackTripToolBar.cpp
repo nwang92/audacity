@@ -486,6 +486,9 @@ void JackTripToolBar::FillRecordings()
          }
       }
    );
+
+   std::this_thread::sleep_for(std::chrono::seconds(15));
+   RepopulateMenus();
 }
 
 void JackTripToolBar::AppendSubMenu(JackTripToolBar &toolbar,
