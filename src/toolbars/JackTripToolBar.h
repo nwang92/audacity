@@ -42,6 +42,7 @@
 #include "AudacityMessageBox.h"
 #include "../widgets/FileHistory.h"
 
+const std::string kApiBaseUrl = "https://app.jacktrip.org";
 const std::string kAuthAuthorizeUrl = "https://auth.jacktrip.org/authorize";
 const std::string kAuthTokenUrl = "https://auth.jacktrip.org/oauth/token";
 const std::string kAuthAudience = "https://api.jacktrip.org";

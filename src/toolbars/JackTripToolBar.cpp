@@ -434,7 +434,7 @@ void JackTripToolBar::FillServers()
    }
    mServers.Clear();
 
-   audacity::network_manager::Request request("https://app.jacktrip.org/api/servers");
+   audacity::network_manager::Request request(kApiBaseUrl + "/api/servers");
    request.setHeader("Authorization", "Bearer " + mAccessToken);
    request.setHeader("Content-Type", "application/json");
    request.setHeader("Accept", "application/json");
@@ -495,7 +495,7 @@ void JackTripToolBar::FillRecordings()
    mRecordingIdToName.clear();
    mServerIdToRecordings.clear();
 
-   audacity::network_manager::Request request("https://app.jacktrip.org/api/users/" + mUserID + "/recordings");
+   audacity::network_manager::Request request(kApiBaseUrl +  "/api/users/" + mUserID + "/recordings");
    request.setHeader("Authorization", "Bearer " + mAccessToken);
    request.setHeader("Content-Type", "application/json");
    request.setHeader("Accept", "application/json");
@@ -721,7 +721,7 @@ void JackTripToolBar::GetRecordingDownloadURL(std::string serverID, std::string 
    if (mAccessToken.empty()) {
       return;
    }
-   std::string url = "https://app.jacktrip.org/api/servers/" + serverID + "/recordings/" + recordingID + "/download";
+   std::string url = kApiBaseUrl +  "/api/servers/" + serverID + "/recordings/" + recordingID + "/download";
    audacity::network_manager::Request request(url);
    request.setHeader("Authorization", "Bearer " + mAccessToken);
    request.setHeader("Content-Type", "application/json");
