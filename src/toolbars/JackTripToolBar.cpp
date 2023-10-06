@@ -28,6 +28,7 @@
 #include <wx/filename.h>
 #include <wx/dialog.h>
 #include <wx/statline.h>
+#include <wx/bitmap.h>
 
 #include "wxPanelWrapper.h"
 
@@ -633,6 +634,9 @@ void JackTripToolBar::OnStudio(std::string serverID, int id)
 {
    wxLogInfo("Clicked on %d for serverID %s", id, serverID);
    std::cout << "Clicked on " << serverID << std::endl;
+   VirtualStudioServerDialog dlg(this, serverID, mAccessToken);
+   int retCode = dlg.ShowModal();
+   dlg.Center();
 }
 
 void JackTripToolBar::OnRecording(std::string serverID, int id)
@@ -970,15 +974,18 @@ AttachedToolBarMenuItem sAttachment{
 }
 
 enum {
-   CancelButtonID = 10000,
+   CancelAuthButtonID = 10000,
    SignInButtonID,
-   CloseButtonID,
+   CloseAuthButtonID,
+   JoinButtonID,
+   RecordingButtonID,
+   CloseStudioButtonID,
 };
 
 BEGIN_EVENT_TABLE(VirtualStudioAuthDialog, wxDialogWrapper)
-   EVT_BUTTON(CancelButtonID, VirtualStudioAuthDialog::OnClose)
+   EVT_BUTTON(CancelAuthButtonID, VirtualStudioAuthDialog::OnClose)
    EVT_BUTTON(SignInButtonID, VirtualStudioAuthDialog::OnSignIn)
-   EVT_BUTTON(CloseButtonID, VirtualStudioAuthDialog::OnClose)
+   EVT_BUTTON(CloseAuthButtonID, VirtualStudioAuthDialog::OnClose)
 END_EVENT_TABLE();
 
 VirtualStudioAuthDialog::VirtualStudioAuthDialog(wxWindow* parent, std::string* parentAccessTokenPtr):
@@ -1039,7 +1046,7 @@ void VirtualStudioAuthDialog::DoLayout()
          {
             s.AddSpace(0, 0, 1);
 
-            mCancel = s.Id(CancelButtonID).AddButton(XXO("&Cancel"));
+            mCancel = s.Id(CancelAuthButtonID).AddButton(XXO("&Cancel"));
             mSignIn = s.Id(SignInButtonID).AddButton(XXO("&Sign In"));
 
             s.AddSpace(0, 0, 1);
@@ -1081,7 +1088,7 @@ void VirtualStudioAuthDialog::UpdateLayout()
          {
             s.AddSpace(0, 0, 1);
 
-            mClose = s.Id(CloseButtonID).AddButton(XXO("&Close"));
+            mClose = s.Id(CloseAuthButtonID).AddButton(XXO("&Close"));
 
             s.AddSpace(0, 0, 1);
          }
@@ -1238,5 +1245,154 @@ void VirtualStudioAuthDialog::OnSignIn(wxCommandEvent &event)
 
 void VirtualStudioAuthDialog::OnClose(wxCommandEvent &event)
 {
+   Close();
+}
+
+BEGIN_EVENT_TABLE(VirtualStudioServerDialog, wxDialogWrapper)
+   EVT_BUTTON(JoinButtonID, VirtualStudioServerDialog::OnJoin)
+   EVT_BUTTON(RecordingButtonID, VirtualStudioServerDialog::OnRecord)
+   EVT_BUTTON(CloseStudioButtonID, VirtualStudioServerDialog::OnClose)
+END_EVENT_TABLE();
+
+VirtualStudioServerDialog::VirtualStudioServerDialog(wxWindow* parent, std::string serverID, std::string accessToken):
+   wxDialogWrapper(parent, wxID_ANY, XO("Join Virtual Studio"), wxDefaultPosition, { 480, -1 }, wxDEFAULT_DIALOG_STYLE)
+{
+   mServerID = serverID;
+   mAccessToken = accessToken;
+   if (!mServerID.empty() && !mAccessToken.empty()) {
+      FetchServer();
+   }
+}
+
+VirtualStudioServerDialog::~VirtualStudioServerDialog()
+{
+   mServerID = "";
+   mAccessToken = "";
+}
+
+void VirtualStudioServerDialog::DoLayout()
+{
+   ShuttleGui s(this, eIsCreating);
+
+   s.StartVerticalLay();
+   {
+      s.StartInvisiblePanel(16);
+      {
+         s.SetBorder(0);
+         s.AddSpace(0, 16, 0);
+         s.AddTitle(XO("JackTrip Virtual Studio"));
+
+         if (!mServerBannerUrl.empty()) {
+            s.AddSpace(0, 16, 0);
+            wxBitmap bitmap;
+            bitmap.LoadFile(mServerBannerUrl);
+            //wxImage rescaledImage(bitmap.ConvertToImage());
+            //rescaledImage.Rescale((int)(LOGOWITHNAME_WIDTH), (int)(LOGOWITHNAME_HEIGHT));
+            //wxBitmap rescaledBitmap(rescaledImage);
+            s.AddIcon(&bitmap);
+         }
+
+         s.AddSpace(0, 16, 0);
+         s.AddTitle(XO("Name: " + mServerName));
+
+         s.AddSpace(0, 16, 0);
+
+         s.AddWindow(safenew wxStaticLine { s.GetParent() }, wxEXPAND);
+
+         s.AddSpace(0, 10, 0);
+
+         s.StartHorizontalLay(wxEXPAND, 0);
+         {
+            s.AddSpace(0, 0, 1);
+
+            mClose = s.Id(CloseStudioButtonID).AddButton(XXO("&Close"));
+            mJoin = s.Id(JoinButtonID).AddButton(XXO("&Launch JackTrip App"));
+
+            s.AddSpace(0, 0, 1);
+         }
+         s.EndHorizontalLay();
+
+         s.AddSpace(0, 16, 0);
+      }
+      s.EndInvisiblePanel();
+   }
+   s.EndVerticalLay();
+
+   Layout();
+   Fit();
+   Centre();
+}
+
+void VirtualStudioServerDialog::UpdateLayout()
+{
+   std::cout << "UpdateLayout called" << std::endl;
+}
+
+void VirtualStudioServerDialog::FetchServer()
+{
+   audacity::network_manager::Request request(kApiBaseUrl + "/api/servers/" + mServerID);
+   request.setHeader("Authorization", "Bearer " + mAccessToken);
+   request.setHeader("Content-Type", "application/json");
+   request.setHeader("Accept", "application/json");
+
+   auto response = audacity::network_manager::NetworkManager::GetInstance().doGet(request);
+   response->setRequestFinishedCallback(
+      [response, this](auto)
+      {
+         const auto httpCode = response->getHTTPCode();
+         wxLogInfo("FetchServer HTTP code: %d", httpCode);
+
+         if (httpCode != 200)
+            return;
+
+         const auto body = response->readAll<std::string>();
+
+         using namespace rapidjson;
+         Document document;
+         document.Parse(body.data(), body.size());
+
+         // Check for parse errors
+         if (document.HasParseError()) {
+            wxLogInfo("Error parsing JSON: %s", document.GetParseError());
+            return;
+         }
+
+         mServerName = document["name"].GetString();
+         mServerBannerUrl = document["bannerURL"].GetString();
+         mServerSessionID = document["sessionId"].GetString();
+         mServerStatus = document["status"].GetString();
+         mServerEnabled = document["enabled"].GetBool();
+
+         std::cout << mServerName << std::endl;
+         std::cout << mServerBannerUrl << std::endl;
+         std::cout << mServerSessionID << std::endl;
+         std::cout << mServerStatus << std::endl;
+         std::cout << mServerEnabled << std::endl;
+
+         wxTheApp->CallAfter([this]{ DoLayout(); });
+      }
+   );
+}
+
+void VirtualStudioServerDialog::OnJoin(wxCommandEvent &event)
+{
+   if (mServerID.empty()) {
+      return;
+   }
+   auto url = "jacktrip://join/" + mServerID;
+   BasicUI::OpenInDefaultBrowser(url);
+}
+
+void VirtualStudioServerDialog::OnRecord(wxCommandEvent &event)
+{
+   if (mServerID.empty()) {
+      return;
+   }
+   std::cout << "OnRecord called" << std::endl;
+}
+
+void VirtualStudioServerDialog::OnClose(wxCommandEvent &event)
+{
+   std::cout << "OnClose called" << std::endl;
    Close();
 }

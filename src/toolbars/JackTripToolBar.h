@@ -55,6 +55,7 @@ class wxMenu;
 class wxString;
 class wxButton;
 class VirtualStudioAuthDialog;
+class VirtualStudioServerDialog;
 struct DeviceSourceMap;
 
 class JackTripToolBar final : public ToolBar {
@@ -292,8 +293,6 @@ class VirtualStudioAuthDialog final : public wxDialogWrapper
    VirtualStudioAuthDialog(wxWindow* parent, std::string* parentAccessTokenPtr);
    ~VirtualStudioAuthDialog();
 
-   float Get();
-
  private:
    void DoLayout();
    void UpdateLayout();
@@ -323,6 +322,39 @@ class VirtualStudioAuthDialog final : public wxDialogWrapper
    bool mSuccess;
    int mStyle;
    float mValue;
+
+ public:
+   DECLARE_EVENT_TABLE()
+};
+
+class VirtualStudioServerDialog final : public wxDialogWrapper
+{
+ public:
+   VirtualStudioServerDialog(wxWindow* parent, std::string serverID, std::string accessToken);
+   ~VirtualStudioServerDialog();
+
+ private:
+   void DoLayout();
+   void UpdateLayout();
+
+   void FetchServer();
+
+   void OnJoin(wxCommandEvent &event);
+   void OnRecord(wxCommandEvent &event);
+   void OnClose(wxCommandEvent &event);
+
+   wxButton *mJoin;
+   wxButton *mRecord;
+   wxButton *mClose;
+
+   std::string mServerID;
+   std::string mServerName;
+   std::string mServerBannerUrl;
+   std::string mServerSessionID;
+   std::string mServerStatus;
+   bool mServerEnabled;
+
+   std::string mAccessToken;
 
  public:
    DECLARE_EVENT_TABLE()
