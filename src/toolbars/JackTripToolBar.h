@@ -83,6 +83,7 @@ class JackTripToolBar final : public ToolBar {
 
  private:
    void OnRescannedDevices(DeviceChangeMessage);
+   void OnStudio(std::string serverID, int id);
    void OnRecording(std::string serverID, int id);
    void OnAuth(wxCommandEvent& event);
    std::string ExecCommand(const char* cmd);
@@ -103,6 +104,8 @@ class JackTripToolBar final : public ToolBar {
 
    class Choices;
    void RepopulateMenus();
+   void FillVirtualStudio();
+   void FillServers();
    void FillRecordings();
    void RegenerateTooltips() override;
 
@@ -114,9 +117,12 @@ class JackTripToolBar final : public ToolBar {
    // Bind menu items to lambdas that invoke callback,
    // with successive ids from 0
    // Check the item with given index, or disable the submenu when that is < 0
-   static void AppendSubMenu(JackTripToolBar &toolbar, wxMenu& menu,
+   static void AppendRecordingsSubMenu(JackTripToolBar &toolbar, wxMenu& menu,
       const wxArrayString &labels, int checkedItem,
       std::string serverID, JackTripCallback callback, const wxString& title);
+   static void AppendStudiosSubMenu(JackTripToolBar &toolbar, wxMenu& menu,
+      const wxArrayString &names, const wxArrayString &ids, int checkedItem,
+      JackTripCallback callback, const wxString& title);
 
    enum {
       ID_JACKTRIP_BUTTON = 15000,
@@ -129,7 +135,29 @@ class JackTripToolBar final : public ToolBar {
    std::vector<std::string> mInputDevices{};
    std::vector<std::string> mOutputDevices{};
 
-   class JackTripChoices {
+   class JackTripServer {
+   public:
+      JackTripServer(std::string id, std::string name, std::string sessionId, bool managed, bool enabled) {
+         mID = id;
+         mName = name;
+         mSessionID = sessionId;
+         mManaged = managed;
+         mEnabled = enabled;
+      }
+
+      std::string GetName() {
+         return mName;
+      }
+
+   private:
+      std::string mID;
+      std::string mName;
+      std::string mSessionID;
+      bool mManaged;
+      bool mEnabled;
+   };
+
+   class JackTripRecordingChoices {
    public:
       void Clear() { mStrings.Clear(); mIds.Clear(); mIndex = -1; }
       [[nodiscard]] bool Empty() const { return mStrings.empty(); }
@@ -184,13 +212,68 @@ class JackTripToolBar final : public ToolBar {
       int mIndex{ -1 };
    };
 
+   class JackTripStudioChoices {
+   public:
+      void Clear() { mStrings.Clear(); mIndex = -1; }
+      [[nodiscard]] bool Empty() const { return mStrings.empty(); }
+      std::optional<wxString> Get() const {
+         if (mIndex < 0 || mIndex >= mStrings.size())
+            return {};
+         return { mStrings[mIndex] };
+      }
+      wxString GetFirst() const {
+         if (!Empty())
+            return mStrings[0];
+         return {};
+      }
+      int GetSmallIntegerId() const {
+         return mIndex;
+      }
+      int Find(const wxString &name) const {
+         return make_iterator_range(mStrings).index(name);
+      }
+      bool Set(const wxString &name) {
+         auto index = make_iterator_range(mStrings).index(name);
+         if (index != -1) {
+            mIndex = index;
+            return true;
+         }
+         // else no state change
+         return false;
+      }
+      void Set(wxArrayString &&names) {
+         mStrings.swap(names);
+         mIndex = mStrings.empty() ? -1 : 0;
+      }
+      void Set(wxArrayString &&names, wxArrayString &&ids) {
+         mStrings.swap(names);
+         mIds.swap(ids);
+         mIndex = mStrings.empty() ? -1 : 0;
+      }
+      // id is just a small-integer index into the string array
+      bool Set(int id) {
+         if (id < 0 || id >= mStrings.size())
+            return false; // no change of state then
+         mIndex = id;
+         return true;
+      }
+      void AppendSubMenu(JackTripToolBar &toolBar,
+         wxMenu &menu, JackTripCallback callback, const wxString &title);
+
+   private:
+      wxArrayStringEx mStrings;
+      wxArrayStringEx mIds;
+      int mIndex{ -1 };
+   };
+
    // Jacktrip-specific options
    std::string mAccessToken;
    std::string mUserID;
    std::unique_ptr<BasicUI::ProgressDialog> mProgressDialog;
+   JackTripStudioChoices mServers;
    std::map<std::string, std::string> mServerIdToName;
    std::map<std::string, std::string> mRecordingIdToName;
-   std::map<std::string, JackTripChoices> mServerIdToRecordings;
+   std::map<std::string, JackTripRecordingChoices> mServerIdToRecordings;
    std::string mDownloadFile;
    std::ofstream mDownloadOutput;
 

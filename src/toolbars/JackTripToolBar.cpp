@@ -117,8 +117,6 @@ void JackTripToolBar::Create(wxWindow *parent)
    ToolBar::Create(parent);
 
    std::cout << "Hello World!" << std::endl;
-   std::cout << "Hello World!" << std::endl;
-   std::cout << "Hello World!" << std::endl;
 
    GetUserInfo();
    /*
@@ -145,6 +143,7 @@ void JackTripToolBar::Create(wxWindow *parent)
 
 void JackTripToolBar::DeinitChildren()
 {
+   mServers.Clear();
    mServerIdToName.clear();
    mRecordingIdToName.clear();
    mServerIdToRecordings.clear();
@@ -269,6 +268,8 @@ void JackTripToolBar::OnFocus(wxFocusEvent &event)
 void JackTripToolBar::OnAudioSetup(wxCommandEvent& WXUNUSED(evt))
 {
    wxMenu menu;
+   wxMenu* recordingsSubMenu = new wxMenu();
+   wxMenu* serversSubMenu = new wxMenu();
 
    if (mUserID.empty() || mAccessToken.empty()) {
       menu.Append(kAudioSettings, _("&Login"));
@@ -280,12 +281,14 @@ void JackTripToolBar::OnAudioSetup(wxCommandEvent& WXUNUSED(evt))
          auto serverID = it->first;
          if (serverID != "") {
             auto name = mServerIdToName[serverID];
-            JackTripChoices c = it->second;
-            c.AppendSubMenu(*this, menu, serverID,
+            JackTripRecordingChoices c = it->second;
+            c.AppendSubMenu(*this, *recordingsSubMenu, serverID,
                &JackTripToolBar::OnRecording, _("&" + name));
-            menu.AppendSeparator();
+            recordingsSubMenu->AppendSeparator();
          }
       }
+      menu.AppendSubMenu(recordingsSubMenu, _("Import Recordings..."));
+      mServers.AppendSubMenu(*this, menu, &JackTripToolBar::OnStudio, _("&Join Studio..."));
    }
 
    wxWindow* btn = FindWindow(ID_JACKTRIP_BUTTON);
@@ -363,7 +366,7 @@ void JackTripToolBar::RegenerateTooltips()
 
 void JackTripToolBar::RepopulateMenus()
 {
-   FillRecordings();
+   FillVirtualStudio();
    // make the device display selection reflect the prefs if they exist
    UpdatePrefs();
 }
@@ -408,6 +411,77 @@ void JackTripToolBar::GetUserInfo()
          wxLogInfo("Sub: %s", sub);
          mUserID = sub;
          RepopulateMenus();
+      }
+   );
+}
+
+void JackTripToolBar::FillVirtualStudio()
+{
+   if (mUserID.empty() || mAccessToken.empty()) {
+      return;
+   }
+
+   FillServers();
+   FillRecordings();
+   std::this_thread::sleep_for(std::chrono::seconds(30));
+   RepopulateMenus();
+}
+
+void JackTripToolBar::FillServers()
+{
+   if (mUserID.empty() || mAccessToken.empty()) {
+      return;
+   }
+   mServers.Clear();
+
+   audacity::network_manager::Request request("https://app.jacktrip.org/api/servers");
+   request.setHeader("Authorization", "Bearer " + mAccessToken);
+   request.setHeader("Content-Type", "application/json");
+   request.setHeader("Accept", "application/json");
+
+   auto response = audacity::network_manager::NetworkManager::GetInstance().doGet(request);
+   response->setRequestFinishedCallback(
+      [response, this](auto)
+      {
+         const auto httpCode = response->getHTTPCode();
+         wxLogInfo("FillServers HTTP code: %d", httpCode);
+
+         if (httpCode != 200)
+            return;
+
+         const auto body = response->readAll<std::string>();
+
+         using namespace rapidjson;
+
+         Document document;
+         document.Parse(body.data(), body.size());
+
+         // Check for parse errors
+         if (document.HasParseError()) {
+            wxLogInfo("Error parsing JSON: %s", document.GetParseError());
+            return;
+         }
+
+         wxArrayString serverIds;
+         wxArrayString serverNames;
+
+         // Iterate over the array of objects
+         Value::ConstValueIterator itr;
+         for (itr = document.Begin(); itr != document.End(); ++itr) {
+            auto serverID = itr->GetObject()["id"].GetString();
+            auto serverName = itr->GetObject()["name"].GetString();
+            auto sessionID = itr->GetObject()["sessionId"].GetString();
+            auto enabled = itr->GetObject()["enabled"].GetBool();
+            auto managed = itr->GetObject()["managed"].GetBool();
+            if (!managed) {
+               continue;
+            }
+
+            serverIds.push_back(serverID);
+            serverNames.push_back(serverName);
+         }
+
+         mServers.Set(std::move(serverNames), std::move(serverIds));
       }
    );
 }
@@ -476,7 +550,7 @@ void JackTripToolBar::FillRecordings()
 
          for (auto it = mServerIdToName.begin(); it != mServerIdToName.end(); it++) {
             auto serverID = it->first;
-            JackTripChoices recordings;
+            JackTripRecordingChoices recordings;
 
             auto names = recordingNamesByServerID[serverID];
             auto ids = recordingIdsByServerID[serverID];
@@ -486,12 +560,9 @@ void JackTripToolBar::FillRecordings()
          }
       }
    );
-
-   std::this_thread::sleep_for(std::chrono::seconds(15));
-   RepopulateMenus();
 }
 
-void JackTripToolBar::AppendSubMenu(JackTripToolBar &toolbar,
+void JackTripToolBar::AppendRecordingsSubMenu(JackTripToolBar &toolbar,
    wxMenu& menu, const wxArrayString &labels, int checkedItem,
    std::string serverID, JackTripCallback callback, const wxString& title)
 {
@@ -513,10 +584,42 @@ void JackTripToolBar::AppendSubMenu(JackTripToolBar &toolbar,
    //   menuItem->Enable(false);
 }
 
-void JackTripToolBar::JackTripChoices::AppendSubMenu(JackTripToolBar &toolBar,
+void JackTripToolBar::AppendStudiosSubMenu(JackTripToolBar &toolbar,
+   wxMenu& menu, const wxArrayString &names, const wxArrayString &ids, int checkedItem,
+   JackTripCallback callback, const wxString& title)
+{
+   auto subMenu = std::make_unique<wxMenu>();
+   int ii = 0;
+   for(size_t i = 0; i < names.GetCount(); i++) {
+      std::string serverID = std::string(ids[i].mb_str());
+      wxString name = names[i];
+
+      // Assign fresh ID with wxID_ANY
+      auto subMenuItem = subMenu->AppendCheckItem(wxID_ANY, name);
+      //if (ii == checkedItem)
+      subMenuItem->Check(false);
+      subMenuItem->Enable(true);
+      subMenu->Bind(wxEVT_MENU,
+         [&toolbar, serverID, callback, ii](wxCommandEvent &){ (toolbar.*callback)(serverID, ii); },
+         subMenuItem->GetId());
+      ++ii;
+   }
+   auto menuItem = menu.AppendSubMenu(subMenu.release(), title);
+   //if (checkedItem < 0)
+   //   menuItem->Enable(false);
+}
+
+
+void JackTripToolBar::JackTripRecordingChoices::AppendSubMenu(JackTripToolBar &toolBar,
    wxMenu &menu, std::string serverID, JackTripCallback callback, const wxString &title)
 {
-   JackTripToolBar::AppendSubMenu(toolBar, menu, mStrings, mIndex, serverID, callback, title);
+   JackTripToolBar::AppendRecordingsSubMenu(toolBar, menu, mStrings, mIndex, serverID, callback, title);
+}
+
+void JackTripToolBar::JackTripStudioChoices::AppendSubMenu(JackTripToolBar &toolBar,
+   wxMenu &menu, JackTripCallback callback, const wxString &title)
+{
+   JackTripToolBar::AppendStudiosSubMenu(toolBar, menu, mStrings, mIds, mIndex, callback, title);
 }
 
 void JackTripToolBar::OnRescannedDevices(DeviceChangeMessage m)
@@ -524,6 +627,12 @@ void JackTripToolBar::OnRescannedDevices(DeviceChangeMessage m)
    // Hosts may have disappeared or appeared so a complete repopulate is needed.
    if (m == DeviceChangeMessage::Rescan)
       RepopulateMenus();
+}
+
+void JackTripToolBar::OnStudio(std::string serverID, int id)
+{
+   wxLogInfo("Clicked on %d for serverID %s", id, serverID);
+   std::cout << "Clicked on " << serverID << std::endl;
 }
 
 void JackTripToolBar::OnRecording(std::string serverID, int id)
@@ -535,7 +644,7 @@ void JackTripToolBar::OnRecording(std::string serverID, int id)
       return;
    }
 
-   JackTripChoices c = mServerIdToRecordings[serverID];
+   JackTripRecordingChoices c = mServerIdToRecordings[serverID];
    auto recordingID = std::string(c.GetID(id).mb_str());
 
    // do nothing if the directory exists - this should mean we already have the files locally
