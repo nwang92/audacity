@@ -330,7 +330,7 @@ class VirtualStudioAuthDialog final : public wxDialogWrapper
 class VirtualStudioServerDialog final : public wxDialogWrapper
 {
  public:
-   VirtualStudioServerDialog(wxWindow* parent, std::string serverID, std::string accessToken);
+   VirtualStudioServerDialog(wxWindow* parent, AudacityProject* projectPtr, std::string serverID, std::string accessToken);
    ~VirtualStudioServerDialog();
 
  private:
@@ -341,10 +341,12 @@ class VirtualStudioServerDialog final : public wxDialogWrapper
 
    void OnJoin(wxCommandEvent &event);
    void OnRecord(wxCommandEvent &event);
+   void OnStop(wxCommandEvent &event);
    void OnClose(wxCommandEvent &event);
 
    wxButton *mJoin;
    wxButton *mRecord;
+   wxButton *mStop;
    wxButton *mClose;
 
    std::string mServerID;
@@ -353,8 +355,10 @@ class VirtualStudioServerDialog final : public wxDialogWrapper
    std::string mServerSessionID;
    std::string mServerStatus;
    bool mServerEnabled;
+   bool mIsRecording;
 
    std::string mAccessToken;
+   AudacityProject *mCurrProject;
 
  public:
    DECLARE_EVENT_TABLE()

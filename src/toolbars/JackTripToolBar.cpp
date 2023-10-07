@@ -41,6 +41,7 @@
 #include "AudioIOBase.h"
 #include "DeviceToolBar.h"
 #include "../KeyboardCapture.h"
+#include "../ProjectAudioManager.h"
 #include "Project.h"
 #include "../ProjectWindows.h"
 #include "DeviceManager.h"
@@ -634,7 +635,7 @@ void JackTripToolBar::OnStudio(std::string serverID, int id)
 {
    wxLogInfo("Clicked on %d for serverID %s", id, serverID);
    std::cout << "Clicked on " << serverID << std::endl;
-   VirtualStudioServerDialog dlg(this, serverID, mAccessToken);
+   VirtualStudioServerDialog dlg(this, &mProject, serverID, mAccessToken);
    int retCode = dlg.ShowModal();
    dlg.Center();
 }
@@ -979,6 +980,7 @@ enum {
    CloseAuthButtonID,
    JoinButtonID,
    RecordingButtonID,
+   StopButtonID,
    CloseStudioButtonID,
 };
 
@@ -1251,14 +1253,16 @@ void VirtualStudioAuthDialog::OnClose(wxCommandEvent &event)
 BEGIN_EVENT_TABLE(VirtualStudioServerDialog, wxDialogWrapper)
    EVT_BUTTON(JoinButtonID, VirtualStudioServerDialog::OnJoin)
    EVT_BUTTON(RecordingButtonID, VirtualStudioServerDialog::OnRecord)
+   EVT_BUTTON(StopButtonID, VirtualStudioServerDialog::OnStop)
    EVT_BUTTON(CloseStudioButtonID, VirtualStudioServerDialog::OnClose)
 END_EVENT_TABLE();
 
-VirtualStudioServerDialog::VirtualStudioServerDialog(wxWindow* parent, std::string serverID, std::string accessToken):
+VirtualStudioServerDialog::VirtualStudioServerDialog(wxWindow* parent, AudacityProject* projectPtr, std::string serverID, std::string accessToken):
    wxDialogWrapper(parent, wxID_ANY, XO("Join Virtual Studio"), wxDefaultPosition, { 480, -1 }, wxDEFAULT_DIALOG_STYLE)
 {
    mServerID = serverID;
    mAccessToken = accessToken;
+   mCurrProject = projectPtr;
    if (!mServerID.empty() && !mAccessToken.empty()) {
       FetchServer();
    }
@@ -1284,33 +1288,50 @@ void VirtualStudioServerDialog::DoLayout()
 
          if (!mServerBannerUrl.empty()) {
             s.AddSpace(0, 16, 0);
-            wxBitmap bitmap;
-            bitmap.LoadFile(mServerBannerUrl);
-            //wxImage rescaledImage(bitmap.ConvertToImage());
-            //rescaledImage.Rescale((int)(LOGOWITHNAME_WIDTH), (int)(LOGOWITHNAME_HEIGHT));
-            //wxBitmap rescaledBitmap(rescaledImage);
-            s.AddIcon(&bitmap);
+            // TODO: This doesn't work
+            // wxImage img;
+            // img.LoadFile(mServerBannerUrl);
+            // img.Rescale((int)(LOGOWITHNAME_WIDTH), (int)(LOGOWITHNAME_HEIGHT));
+            // wxBitmap bitmap(img);
+            // s.AddIcon(&bitmap);
          }
 
          s.AddSpace(0, 16, 0);
          s.AddTitle(XO("Name: " + mServerName));
+         s.AddTitle(XO("Status: " + mServerStatus));
 
          s.AddSpace(0, 16, 0);
 
          s.AddWindow(safenew wxStaticLine { s.GetParent() }, wxEXPAND);
-
-         s.AddSpace(0, 10, 0);
 
          s.StartHorizontalLay(wxEXPAND, 0);
          {
             s.AddSpace(0, 0, 1);
 
             mClose = s.Id(CloseStudioButtonID).AddButton(XXO("&Close"));
+            s.AddSpace(4, 0, 0);
             mJoin = s.Id(JoinButtonID).AddButton(XXO("&Launch JackTrip App"));
 
             s.AddSpace(0, 0, 1);
          }
          s.EndHorizontalLay();
+
+         if (!mServerSessionID.empty()) {
+            s.AddSpace(0, 24, 0);
+            s.AddTitle(XO("Record Live Session"));
+            s.AddSpace(0, 8, 0);
+            s.StartHorizontalLay(wxEXPAND, 0);
+            {
+               s.AddSpace(0, 0, 1);
+
+               mRecord = s.Id(RecordingButtonID).AddButton(XXO("&Record"));
+               s.AddSpace(4, 0, 0);
+               mStop = s.Id(StopButtonID).AddButton(XXO("&Stop"));
+
+               s.AddSpace(0, 0, 1);
+            }
+            s.EndHorizontalLay();
+         }
 
          s.AddSpace(0, 16, 0);
       }
@@ -1389,10 +1410,21 @@ void VirtualStudioServerDialog::OnRecord(wxCommandEvent &event)
       return;
    }
    std::cout << "OnRecord called" << std::endl;
+   ProjectAudioManager::Get( *mCurrProject ).OnRecord( false );
+   mIsRecording = true;
+}
+
+void VirtualStudioServerDialog::OnStop(wxCommandEvent &event)
+{
+   auto &projectAudioManager = ProjectAudioManager::Get( *mCurrProject );
+   bool canStop = projectAudioManager.CanStopAudioStream();
+   if ( canStop ) {
+      projectAudioManager.Stop();
+   }
+   mIsRecording = false;
 }
 
 void VirtualStudioServerDialog::OnClose(wxCommandEvent &event)
 {
-   std::cout << "OnClose called" << std::endl;
    Close();
 }
