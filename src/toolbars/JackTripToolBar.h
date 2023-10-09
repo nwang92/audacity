@@ -38,6 +38,7 @@
 #include "TempDirectory.h"
 #include "Observer.h"
 #include "MemoryX.h"
+#include "WaveTrack.h"
 //#include "../widgets/MeterPanel.h"
 #include "AudacityMessageBox.h"
 #include "../widgets/FileHistory.h"
@@ -56,10 +57,14 @@ class wxString;
 class wxButton;
 class VirtualStudioAuthDialog;
 class VirtualStudioServerDialog;
+class VSFLACImportFileHandle;
+class MyVSFLACFile;
 struct DeviceSourceMap;
+using NewChannelGroup = std::vector< std::shared_ptr<WaveTrack> >;
 
 class JackTripToolBar final : public ToolBar {
    static constexpr int kAudioSettings = 15800;
+   static constexpr int kTestButton = 15801;
 
  public:
    static Identifier ID();
@@ -87,6 +92,7 @@ class JackTripToolBar final : public ToolBar {
    void OnRescannedDevices(DeviceChangeMessage);
    void OnStudio(std::string serverID, int id);
    void OnRecording(std::string serverID, int id);
+   void OnRecord(wxCommandEvent& event);
    void OnAuth(wxCommandEvent& event);
    std::string ExecCommand(const char* cmd);
    bool JackTripExists();
@@ -354,6 +360,7 @@ class VirtualStudioServerDialog final : public wxDialogWrapper
    std::string mServerBannerUrl;
    std::string mServerSessionID;
    std::string mServerStatus;
+   double mServerSampleRate;
    bool mServerEnabled;
    bool mIsRecording;
 
@@ -365,4 +372,3 @@ class VirtualStudioServerDialog final : public wxDialogWrapper
 };
 
 #endif
-

@@ -29,6 +29,15 @@
 #include <wx/dialog.h>
 #include <wx/statline.h>
 #include <wx/bitmap.h>
+// For compilers that support precompilation, includes "wx/wx.h".
+#include <wx/wxprec.h>
+#ifndef WX_PRECOMP
+// Include your minimal set of headers here, or wx.h
+#include <wx/window.h>
+#endif
+#include <wx/defs.h>
+#include <wx/file.h>
+#include <wx/ffile.h>
 
 #include "wxPanelWrapper.h"
 
@@ -48,7 +57,505 @@
 #include "../prefs/PrefsDialog.h"
 #include "../widgets/AButton.h"
 #include "../widgets/BasicMenu.h"
+#include "WaveTrack.h"
+#include "SampleFormat.h"
 #include "wxWidgetsWindowPlacement.h"
+#include "Prefs.h"
+#include "../import/Import.h"
+#include "../import/ImportPlugin.h"
+
+#include "SelectFile.h"
+#include "Tags.h"
+#include "ProgressDialog.h"
+
+#define FLAC_HEADER "fLaC"
+
+#define DESC XO("FLAC files")
+
+static const auto exts = {
+   wxT("flac"),
+   wxT("flc")
+};
+
+#ifndef USE_LIBFLAC
+#else /* USE_LIBFLAC */
+
+#include "FLAC++/decoder.h"
+
+#ifdef USE_LIBID3TAG
+extern "C" {
+#include <id3tag.h>
+}
+#endif
+
+/* FLACPP_API_VERSION_CURRENT is 6 for libFLAC++ from flac-1.1.3 (see <FLAC++/export.h>) */
+#if !defined FLACPP_API_VERSION_CURRENT || FLACPP_API_VERSION_CURRENT < 6
+#define LEGACY_FLAC
+#else
+#undef LEGACY_FLAC
+#endif
+
+
+class VSFLACImportFileHandle;
+
+class MyVSFLACFile final : public FLAC::Decoder::File
+{
+ public:
+   MyVSFLACFile(VSFLACImportFileHandle *handle) : mFile(handle)
+   {
+      mWasError = false;
+      set_metadata_ignore_all();
+      set_metadata_respond(FLAC__METADATA_TYPE_VORBIS_COMMENT);
+      set_metadata_respond(FLAC__METADATA_TYPE_STREAMINFO);
+   }
+
+   bool get_was_error() const
+   {
+      return mWasError;
+   }
+ private:
+   friend class VSFLACImportFileHandle;
+   VSFLACImportFileHandle *mFile;
+   bool                  mWasError;
+   wxArrayString         mComments;
+ protected:
+   FLAC__StreamDecoderWriteStatus write_callback(const FLAC__Frame *frame,
+                                                         const FLAC__int32 * const buffer[]) override;
+   void metadata_callback(const FLAC__StreamMetadata *metadata) override;
+   void error_callback(FLAC__StreamDecoderErrorStatus status) override;
+};
+
+
+class VSFLACImportPlugin final : public ImportPlugin
+{
+ public:
+   VSFLACImportPlugin():
+   ImportPlugin( FileExtensions( exts.begin(), exts.end() ) )
+   {
+   }
+
+   ~VSFLACImportPlugin() { }
+
+   wxString GetPluginStringID() override { return wxT("libflac"); }
+   TranslatableString GetPluginFormatDescription() override;
+   std::unique_ptr<ImportFileHandle> Open(
+      const FilePath &Filename, AudacityProject*)  override;
+};
+
+
+class VSFLACImportFileHandle final : public ImportFileHandle
+{
+   friend class MyVSFLACFile;
+public:
+   VSFLACImportFileHandle(const FilePath & name);
+   ~VSFLACImportFileHandle();
+
+   bool Init(WaveTrackFactory *trackFactory);
+
+   TranslatableString GetFileDescription() override;
+   ByteCount GetFileUncompressedBytes() override;
+   ProgressResult Import(WaveTrackFactory *trackFactory, TrackHolders &outTracks,
+              Tags *tags) override;
+
+   ProgressResult ImportForVS(TrackHolders &outTracks);
+
+   wxInt32 GetStreamCount() override { return 1; }
+
+   const TranslatableStrings &GetStreamInfo() override
+   {
+      static TranslatableStrings empty;
+      return empty;
+   }
+
+   void SetStreamUsage(wxInt32 WXUNUSED(StreamID), bool WXUNUSED(Use)) override
+   {}
+
+private:
+   sampleFormat          mFormat;
+   std::unique_ptr<MyVSFLACFile> mFile;
+   wxFFile               mHandle;
+   unsigned long         mSampleRate;
+   unsigned long         mNumChannels;
+   unsigned long         mBitsPerSample;
+   FLAC__uint64          mNumSamples;
+   FLAC__uint64          mSamplesDone;
+   bool                  mStreamInfoDone;
+   ProgressResult        mUpdateResult;
+   NewChannelGroup       mChannels;
+};
+
+
+void MyVSFLACFile::metadata_callback(const FLAC__StreamMetadata *metadata)
+{
+   switch (metadata->type)
+   {
+      case FLAC__METADATA_TYPE_VORBIS_COMMENT:
+         for (FLAC__uint32 i = 0; i < metadata->data.vorbis_comment.num_comments; i++) {
+            mComments.push_back(UTF8CTOWX((char *)metadata->data.vorbis_comment.comments[i].entry));
+         }
+      break;
+
+      case FLAC__METADATA_TYPE_STREAMINFO:
+         mFile->mSampleRate=metadata->data.stream_info.sample_rate;
+         mFile->mNumChannels=metadata->data.stream_info.channels;
+         mFile->mBitsPerSample=metadata->data.stream_info.bits_per_sample;
+         mFile->mNumSamples=metadata->data.stream_info.total_samples;
+
+         // Widen mFormat after examining the file header
+         if (mFile->mBitsPerSample<=16) {
+            mFile->mFormat=int16Sample;
+         } else if (mFile->mBitsPerSample<=24) {
+            mFile->mFormat=int24Sample;
+         } else {
+            mFile->mFormat=floatSample;
+         }
+         mFile->mStreamInfoDone=true;
+      break;
+      // handle the other types we do nothing with to avoid a warning
+      case FLAC__METADATA_TYPE_PADDING:	// do nothing with padding
+      case FLAC__METADATA_TYPE_APPLICATION:	// no idea what to do with this
+      case FLAC__METADATA_TYPE_SEEKTABLE:	// don't need a seektable here
+      case FLAC__METADATA_TYPE_CUESHEET:	// convert this to labels?
+      case FLAC__METADATA_TYPE_PICTURE:		// ignore pictures
+      case FLAC__METADATA_TYPE_UNDEFINED:	// do nothing with this either
+
+      // FIXME: not declared when compiling on Ubuntu.
+      //case FLAC__MAX_METADATA_TYPE: // quiet compiler warning with this line
+      default:
+      break;
+   }
+}
+
+void MyVSFLACFile::error_callback(FLAC__StreamDecoderErrorStatus WXUNUSED(status))
+{
+   mWasError = true;
+
+   /*
+   switch (status)
+   {
+   case FLAC__STREAM_DECODER_ERROR_STATUS_LOST_SYNC:
+      wxPrintf(wxT("Flac Error: Lost sync\n"));
+      break;
+   case FLAC__STREAM_DECODER_ERROR_STATUS_FRAME_CRC_MISMATCH:
+      wxPrintf(wxT("Flac Error: Crc mismatch\n"));
+      break;
+   case FLAC__STREAM_DECODER_ERROR_STATUS_BAD_HEADER:
+      wxPrintf(wxT("Flac Error: Bad Header\n"));
+      break;
+   default:
+      wxPrintf(wxT("Flac Error: Unknown error code\n"));
+      break;
+   }*/
+}
+
+FLAC__StreamDecoderWriteStatus MyVSFLACFile::write_callback(const FLAC__Frame *frame,
+                                                          const FLAC__int32 * const buffer[])
+{
+   // Don't let C++ exceptions propagate through libflac
+   return GuardedCall< FLAC__StreamDecoderWriteStatus > ( [&] {
+      auto tmp = ArrayOf< short >{ frame->header.blocksize };
+
+      auto iter = mFile->mChannels.begin();
+      for (unsigned int chn=0; chn<mFile->mNumChannels; ++iter, ++chn) {
+         if (frame->header.bits_per_sample <= 16) {
+            if (frame->header.bits_per_sample == 8) {
+               for (unsigned int s = 0; s < frame->header.blocksize; s++) {
+                  tmp[s] = buffer[chn][s] << 8;
+               }
+            } else /* if (frame->header.bits_per_sample == 16) */ {
+               for (unsigned int s = 0; s < frame->header.blocksize; s++) {
+                  tmp[s] = buffer[chn][s];
+               }
+            }
+
+            iter->get()->Append((samplePtr)tmp.get(),
+                     int16Sample,
+                     frame->header.blocksize, 1,
+                     int16Sample);
+         }
+         else {
+            iter->get()->Append((samplePtr)buffer[chn],
+                     int24Sample,
+                     frame->header.blocksize, 1,
+                     int24Sample);
+         }
+      }
+
+      mFile->mSamplesDone += frame->header.blocksize;
+
+      mFile->mUpdateResult = mFile->mProgress->Update((wxULongLong_t) mFile->mSamplesDone, mFile->mNumSamples != 0 ? (wxULongLong_t)mFile->mNumSamples : 1);
+      if (mFile->mUpdateResult != ProgressResult::Success)
+      {
+         return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
+      }
+
+      return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
+   }, MakeSimpleGuard(FLAC__STREAM_DECODER_WRITE_STATUS_ABORT) );
+}
+
+TranslatableString VSFLACImportPlugin::GetPluginFormatDescription()
+{
+    return DESC;
+}
+
+
+std::unique_ptr<ImportFileHandle> VSFLACImportPlugin::Open(
+   const FilePath &filename, AudacityProject* project)
+{
+   // First check if it really is a FLAC file
+
+   int cnt;
+   wxFile binaryFile;
+   if (!binaryFile.Open(filename)) {
+      return nullptr; // File not found
+   }
+
+   // FIXME: TRAP_ERR wxFILE ops in FLAC Import could fail.
+   // Seek() return value is not examined, for example.
+#ifdef USE_LIBID3TAG
+   // Skip any ID3 tags that might be present
+   id3_byte_t query[ID3_TAG_QUERYSIZE];
+   cnt = binaryFile.Read(query, sizeof(query));
+   cnt = id3_tag_query(query, cnt);
+   binaryFile.Seek(cnt);
+#endif
+
+   char buf[5];
+   cnt = binaryFile.Read(buf, 4);
+   binaryFile.Close();
+
+   if (cnt == wxInvalidOffset || strncmp(buf, FLAC_HEADER, 4) != 0) {
+      // File is not a FLAC file
+      return nullptr;
+   }
+
+   // Open the file for import
+   auto handle = std::make_unique<VSFLACImportFileHandle>(filename);
+
+   auto &trackFactory = WaveTrackFactory::Get( *project );
+   bool success = handle->Init(&trackFactory);
+   if (!success) {
+      return nullptr;
+   }
+
+   // This std::move is needed to "upcast" the pointer type
+   return std::move(handle);
+}
+
+VSFLACImportFileHandle::VSFLACImportFileHandle(const FilePath & name)
+:  ImportFileHandle(name),
+   mSamplesDone(0),
+   mStreamInfoDone(false),
+   mUpdateResult(ProgressResult::Success)
+{
+   // Initialize mFormat as narrowest
+   mFormat = narrowestSampleFormat;
+   mFile = std::make_unique<MyVSFLACFile>(this);
+}
+
+bool VSFLACImportFileHandle::Init(WaveTrackFactory *trackFactory)
+{
+#ifdef LEGACY_FLAC
+   bool success = mFile->set_filename(OSINPUT(mFilename));
+   if (!success) {
+      return false;
+   }
+   mFile->set_metadata_respond(FLAC__METADATA_TYPE_STREAMINFO);
+   mFile->set_metadata_respond(FLAC__METADATA_TYPE_VORBIS_COMMENT);
+   FLAC::Decoder::File::State state = mFile->init();
+   if (state != FLAC__FILE_DECODER_OK) {
+      return false;
+   }
+#else
+   if (!mHandle.Open(mFilename, wxT("rb"))) {
+      return false;
+   }
+
+   // Even though there is an init() method that takes a filename, use the one that
+   // takes a file handle because wxWidgets can open a file with a Unicode name and
+   // libflac can't (under Windows).
+   //
+   // Responsibility for closing the file is passed to libflac.
+   // (it happens when mFile->finish() is called)
+   bool result = mFile->init(mHandle.fp())?true:false;
+   mHandle.Detach();
+
+   if (result != FLAC__STREAM_DECODER_INIT_STATUS_OK) {
+      return false;
+   }
+#endif
+   mFile->process_until_end_of_metadata();
+
+#ifdef LEGACY_FLAC
+   state = mFile->get_state();
+   if (state != FLAC__FILE_DECODER_OK) {
+      return false;
+   }
+#else
+   // not necessary to check state, error callback will catch errors, but here's how:
+   if (mFile->get_state() > FLAC__STREAM_DECODER_READ_FRAME) {
+      return false;
+   }
+#endif
+
+   if (!mFile->is_valid() || mFile->get_was_error()) {
+      // This probably is not a FLAC file at all
+      return false;
+   }
+
+
+   std::cout << "init " << mNumChannels << " samplerate " << mSampleRate << std::endl;
+   mChannels.resize(mNumChannels);
+   {
+      auto iter = mChannels.begin();
+      for (size_t c = 0; c < mNumChannels; ++iter, ++c)
+         *iter = NewWaveTrack(*trackFactory, mFormat, mSampleRate);
+   }
+   return true;
+}
+
+TranslatableString VSFLACImportFileHandle::GetFileDescription()
+{
+   return DESC;
+}
+
+
+auto VSFLACImportFileHandle::GetFileUncompressedBytes() -> ByteCount
+{
+   // TODO: Get Uncompressed byte count.
+   return 0;
+}
+
+
+ProgressResult VSFLACImportFileHandle::Import(WaveTrackFactory *trackFactory,
+                                 TrackHolders &outTracks,
+                                 Tags *tags)
+{
+   outTracks.clear();
+
+   wxASSERT(mStreamInfoDone);
+
+   CreateProgress();
+
+   mChannels.resize(mNumChannels);
+
+   {
+      auto iter = mChannels.begin();
+      for (size_t c = 0; c < mNumChannels; ++iter, ++c)
+         *iter = NewWaveTrack(*trackFactory, mFormat, mSampleRate);
+   }
+
+   // TODO: Vigilant Sentry: Variable res unused after assignment (error code DA1)
+   //    Should check the result.
+   #ifdef LEGACY_FLAC
+      bool res = (mFile->process_until_end_of_file() != 0);
+   #else
+      bool res = (mFile->process_until_end_of_stream() != 0);
+   #endif
+      wxUnusedVar(res);
+
+   if (mUpdateResult == ProgressResult::Failed || mUpdateResult == ProgressResult::Cancelled) {
+      return mUpdateResult;
+   }
+
+   for (const auto &channel : mChannels)
+      channel->Flush();
+
+   if (!mChannels.empty())
+      outTracks.push_back(std::move(mChannels));
+
+   wxString comment;
+   wxString description;
+
+   size_t cnt = mFile->mComments.size();
+   if (cnt > 0) {
+      tags->Clear();
+      for (size_t c = 0; c < cnt; c++) {
+         wxString name = mFile->mComments[c].BeforeFirst(wxT('='));
+         wxString value = mFile->mComments[c].AfterFirst(wxT('='));
+         wxString upper = name.Upper();
+         if (upper == wxT("DATE") && !tags->HasTag(TAG_YEAR)) {
+            long val;
+            if (value.length() == 4 && value.ToLong(&val)) {
+               name = TAG_YEAR;
+            }
+         }
+         else if (upper == wxT("COMMENT") || upper == wxT("COMMENTS")) {
+            comment = value;
+            continue;
+         }
+         else if (upper == wxT("DESCRIPTION")) {
+            description = value;
+            continue;
+         }
+         tags->SetTag(name, value);
+      }
+
+      if (comment.empty()) {
+         comment = description;
+      }
+      if (!comment.empty()) {
+         tags->SetTag(TAG_COMMENTS, comment);
+      }
+   }
+
+   return mUpdateResult;
+}
+
+ProgressResult VSFLACImportFileHandle::ImportForVS(TrackHolders &outTracks)
+{
+   outTracks.clear();
+
+   CreateProgress();
+
+   wxASSERT(mStreamInfoDone);
+
+   // TODO: Vigilant Sentry: Variable res unused after assignment (error code DA1)
+   //    Should check the result.
+   #ifdef LEGACY_FLAC
+      bool res = (mFile->process_until_end_of_file() != 0);
+   #else
+      bool res = (mFile->process_until_end_of_stream() != 0);
+   #endif
+      wxUnusedVar(res);
+
+   if (mUpdateResult == ProgressResult::Failed || mUpdateResult == ProgressResult::Cancelled) {
+      return mUpdateResult;
+   }
+
+   for (const auto &channel : mChannels)
+      channel->Flush();
+
+   if (!mChannels.empty())
+      outTracks.push_back(std::move(mChannels));
+
+   return mUpdateResult;
+}
+
+
+VSFLACImportFileHandle::~VSFLACImportFileHandle()
+{
+   mFile->finish();
+}
+
+#endif /* USE_LIBFLAC */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 namespace {
    class ViewDeviceSettingsDialog final : public PrefsDialog
@@ -278,6 +785,9 @@ void JackTripToolBar::OnAudioSetup(wxCommandEvent& WXUNUSED(evt))
 
       menu.Bind(wxEVT_MENU_CLOSE, [this](auto&) { mJackTrip->PopUp(); });
       menu.Bind(wxEVT_MENU, &JackTripToolBar::OnAuth, this, kAudioSettings);
+
+      menu.Append(kAudioSettings, _("&Test Record"));
+      menu.Bind(wxEVT_MENU, &JackTripToolBar::OnRecord, this, kAudioSettings);
    } else {
       for (auto it = mServerIdToRecordings.begin(); it != mServerIdToRecordings.end(); it++) {
          auto serverID = it->first;
@@ -663,6 +1173,60 @@ void JackTripToolBar::OnRecording(std::string serverID, int id)
    GetRecordingDownloadURL(serverID, recordingID);
 }
 
+void JackTripToolBar::OnRecord(wxCommandEvent& event)
+{
+   std::cout << "OnRecord called" << std::endl;
+
+   std::string flacFile = "/Users/nwang/work/basic-hls-server/good4u.flac";
+   VSFLACImportFileHandle flacHandle(flacFile);
+   auto &trackFactory = WaveTrackFactory::Get( mProject );
+   flacHandle.Init(&trackFactory);
+
+   TrackHolders newTracks;
+   flacHandle.ImportForVS(newTracks);
+
+   /*
+   double sampleRate = 48000;
+   auto &tracks = TrackList::Get( mProject );
+   auto track = WaveTrackFactory::Get( mProject ).Create();
+
+   //auto track = WaveTrack::New( mProject );
+   track->SetRate(sampleRate);
+   track->SetName("New Wave Track");
+
+   tracks.Add(track);
+   */
+
+
+   /*
+   auto numSamples = 2048;
+   std::ifstream infile(flacFile, std::ios::binary);
+   char buffer[numSamples];
+   infile.read(buffer, numSamples);
+   track->Append((samplePtr)buffer, floatSample, numSamples);
+   */
+
+   /*
+   auto track = WaveTrack::New( *mCurrProject );
+   std::string flacFile = "/Users/nwang/work/basic-hls-server/good4u.flac";
+
+   auto importer = FileImporter::Create(FileImporter::FLAC, flacFile);
+   importer->Import(track, false); // set append to false
+
+   bool s1 = ProjectFileManager::Get( *mCurrProject ).Import(flacFile, true);
+   std::cout << "s1: " << s1 << std::endl;
+
+   std::this_thread::sleep_for(std::chrono::seconds(20));
+
+   bool s2 = ProjectFileManager::Get( *mCurrProject ).Import(flacFile, true);
+   std::cout << "s2: " << s2 << std::endl;
+   */
+
+   /*
+   ProjectAudioManager::Get( *mCurrProject ).OnVirtualStudioRecord( false );
+   mIsRecording = true;
+   */
+}
 void JackTripToolBar::OnAuth(wxCommandEvent& event)
 {
    VirtualStudioAuthDialog dlg(this, &mAccessToken);
@@ -1316,7 +1880,7 @@ void VirtualStudioServerDialog::DoLayout()
          }
          s.EndHorizontalLay();
 
-         if (!mServerSessionID.empty()) {
+         if (!mServerSessionID.empty() || mServerSessionID.empty()) {
             s.AddSpace(0, 24, 0);
             s.AddTitle(XO("Record Live Session"));
             s.AddSpace(0, 8, 0);
@@ -1382,12 +1946,14 @@ void VirtualStudioServerDialog::FetchServer()
          mServerBannerUrl = document["bannerURL"].GetString();
          mServerSessionID = document["sessionId"].GetString();
          mServerStatus = document["status"].GetString();
+         mServerSampleRate = document["sampleRate"].GetDouble();
          mServerEnabled = document["enabled"].GetBool();
 
          std::cout << mServerName << std::endl;
          std::cout << mServerBannerUrl << std::endl;
          std::cout << mServerSessionID << std::endl;
          std::cout << mServerStatus << std::endl;
+         std::cout << mServerSampleRate << std::endl;
          std::cout << mServerEnabled << std::endl;
 
          wxTheApp->CallAfter([this]{ DoLayout(); });
@@ -1410,8 +1976,42 @@ void VirtualStudioServerDialog::OnRecord(wxCommandEvent &event)
       return;
    }
    std::cout << "OnRecord called" << std::endl;
-   ProjectAudioManager::Get( *mCurrProject ).OnRecord( false );
+
+   NewChannelGroup       mChannels;
+   std::string flacFile = "/Users/nwang/work/basic-hls-server/good4u.flac";
+
+   //auto track = WaveTrackFactory::Get(*mCurrProject).Create();
+   auto track = WaveTrack::New( *mCurrProject );
+   track->SetRate(mServerSampleRate);
+
+   auto numSamples = 2048;
+   std::ifstream infile(flacFile, std::ios::binary);
+   char buffer[numSamples];
+   infile.read(buffer, numSamples);
+   track->Append((samplePtr)buffer, floatSample, numSamples);
+
+
+
+   /*
+   auto track = WaveTrack::New( *mCurrProject );
+   std::string flacFile = "/Users/nwang/work/basic-hls-server/good4u.flac";
+
+   auto importer = FileImporter::Create(FileImporter::FLAC, flacFile);
+   importer->Import(track, false); // set append to false
+
+   bool s1 = ProjectFileManager::Get( *mCurrProject ).Import(flacFile, true);
+   std::cout << "s1: " << s1 << std::endl;
+
+   std::this_thread::sleep_for(std::chrono::seconds(20));
+
+   bool s2 = ProjectFileManager::Get( *mCurrProject ).Import(flacFile, true);
+   std::cout << "s2: " << s2 << std::endl;
+   */
+
+   /*
+   ProjectAudioManager::Get( *mCurrProject ).OnVirtualStudioRecord( false );
    mIsRecording = true;
+   */
 }
 
 void VirtualStudioServerDialog::OnStop(wxCommandEvent &event)
