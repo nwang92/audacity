@@ -32,6 +32,7 @@
 
 #include <wx/menu.h>
 #include <wx/dialog.h>
+#include <wx/webview.h>
 #include "ToolBar.h"
 #include "BasicUI.h"
 #include "ProjectFileManager.h"
@@ -63,8 +64,9 @@ struct DeviceSourceMap;
 using NewChannelGroup = std::vector< std::shared_ptr<WaveTrack> >;
 
 class JackTripToolBar final : public ToolBar {
-   static constexpr int kAudioSettings = 15800;
+   static constexpr int kLoginButton = 15800;
    static constexpr int kTestButton = 15801;
+   static constexpr int kWebButton = 15802;
 
  public:
    static Identifier ID();
@@ -93,6 +95,7 @@ class JackTripToolBar final : public ToolBar {
    void OnStudio(std::string serverID, int id);
    void OnRecording(std::string serverID, int id);
    void OnRecord(wxCommandEvent& event);
+   void OnWeb(wxCommandEvent& event);
    void OnAuth(wxCommandEvent& event);
    std::string ExecCommand(const char* cmd);
    bool JackTripExists();
@@ -349,10 +352,12 @@ class VirtualStudioServerDialog final : public wxDialogWrapper
    void OnRecord(wxCommandEvent &event);
    void OnStop(wxCommandEvent &event);
    void OnClose(wxCommandEvent &event);
+   void OnWebStudio(wxCommandEvent &event);
 
    wxButton *mJoin;
    wxButton *mRecord;
    wxButton *mStop;
+   wxButton *mWeb;
    wxButton *mClose;
 
    std::string mServerID;
@@ -366,6 +371,29 @@ class VirtualStudioServerDialog final : public wxDialogWrapper
 
    std::string mAccessToken;
    AudacityProject *mCurrProject;
+
+ public:
+   DECLARE_EVENT_TABLE()
+};
+
+class VirtualStudioWebDialog final : public wxDialogWrapper
+{
+ public:
+   VirtualStudioWebDialog(wxWindow * parent, wxWindowID id,
+                std::string url, std::string accessToken,
+                const TranslatableString & title);
+   ~VirtualStudioWebDialog();
+
+   float Get();
+
+ private:
+   void OnSlider(wxCommandEvent &event);
+   void OnTextChange(wxCommandEvent &event);
+   void DoLayout();
+
+   wxWebView* mBrowser;
+   int mStyle;
+   float mValue;
 
  public:
    DECLARE_EVENT_TABLE()

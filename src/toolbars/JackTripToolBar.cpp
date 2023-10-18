@@ -28,6 +28,7 @@
 #include <wx/filename.h>
 #include <wx/dialog.h>
 #include <wx/statline.h>
+#include <wx/webview.h>
 #include <wx/bitmap.h>
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
@@ -781,13 +782,16 @@ void JackTripToolBar::OnAudioSetup(wxCommandEvent& WXUNUSED(evt))
    wxMenu* serversSubMenu = new wxMenu();
 
    if (mUserID.empty() || mAccessToken.empty()) {
-      menu.Append(kAudioSettings, _("&Login"));
+      menu.Append(kLoginButton, _("&Login"));
 
       menu.Bind(wxEVT_MENU_CLOSE, [this](auto&) { mJackTrip->PopUp(); });
-      menu.Bind(wxEVT_MENU, &JackTripToolBar::OnAuth, this, kAudioSettings);
+      menu.Bind(wxEVT_MENU, &JackTripToolBar::OnAuth, this, kLoginButton);
 
-      menu.Append(kAudioSettings, _("&Test Record"));
-      menu.Bind(wxEVT_MENU, &JackTripToolBar::OnRecord, this, kAudioSettings);
+      menu.Append(kTestButton, _("&Test Record"));
+      menu.Bind(wxEVT_MENU, &JackTripToolBar::OnRecord, this, kTestButton);
+
+      menu.Append(kWebButton, _("&Open Web"));
+      menu.Bind(wxEVT_MENU, &JackTripToolBar::OnWeb, this, kWebButton);
    } else {
       for (auto it = mServerIdToRecordings.begin(); it != mServerIdToRecordings.end(); it++) {
          auto serverID = it->first;
@@ -1227,6 +1231,30 @@ void JackTripToolBar::OnRecord(wxCommandEvent& event)
    mIsRecording = true;
    */
 }
+
+void JackTripToolBar::OnWeb(wxCommandEvent& event)
+{
+   std::cout << "Clicked on web menu item" << std::endl;
+
+   VirtualStudioWebDialog dlg(this, wxID_ANY, "https://www.google.com", mAccessToken, XO("Virtual Studio"));
+   dlg.SetSize(800, 600);
+   int retCode = dlg.ShowModal();
+
+   dlg.Center();
+   std::cout << "Return code: " << retCode << std::endl;
+   /*
+   wxTheApp->CallAfter([this]{
+      mBrowser = wxWebView::New(this, wxID_ANY);
+      mBrowser->LoadURL("https://www.audacityteam.org");
+      wxDialogWrapper webDialog(this, wxID_ANY, XO("Virtual Studio"));
+      webDialog.SetTitle("Audacity Website");
+      webDialog.SetChild(mBrowser);
+      webDialog.SetSize(600, 400);
+      webDialog.ShowModal();
+   });
+   */
+}
+
 void JackTripToolBar::OnAuth(wxCommandEvent& event)
 {
    VirtualStudioAuthDialog dlg(this, &mAccessToken);
@@ -1546,6 +1574,7 @@ enum {
    RecordingButtonID,
    StopButtonID,
    CloseStudioButtonID,
+   WebStudioButtonID,
 };
 
 BEGIN_EVENT_TABLE(VirtualStudioAuthDialog, wxDialogWrapper)
@@ -1819,6 +1848,7 @@ BEGIN_EVENT_TABLE(VirtualStudioServerDialog, wxDialogWrapper)
    EVT_BUTTON(RecordingButtonID, VirtualStudioServerDialog::OnRecord)
    EVT_BUTTON(StopButtonID, VirtualStudioServerDialog::OnStop)
    EVT_BUTTON(CloseStudioButtonID, VirtualStudioServerDialog::OnClose)
+   EVT_BUTTON(WebStudioButtonID, VirtualStudioServerDialog::OnWebStudio)
 END_EVENT_TABLE();
 
 VirtualStudioServerDialog::VirtualStudioServerDialog(wxWindow* parent, AudacityProject* projectPtr, std::string serverID, std::string accessToken):
@@ -1882,8 +1912,15 @@ void VirtualStudioServerDialog::DoLayout()
 
          if (!mServerSessionID.empty() || mServerSessionID.empty()) {
             s.AddSpace(0, 24, 0);
-            s.AddTitle(XO("Record Live Session"));
+            s.AddTitle(XO("Actions"));
             s.AddSpace(0, 8, 0);
+            s.StartHorizontalLay(wxEXPAND, 0);
+            {
+               s.AddSpace(0, 0, 1);
+               mWeb = s.Id(WebStudioButtonID).AddButton(XXO("&View Participants"));
+               s.AddSpace(0, 0, 1);
+            }
+            s.EndHorizontalLay();
             s.StartHorizontalLay(wxEXPAND, 0);
             {
                s.AddSpace(0, 0, 1);
@@ -1980,6 +2017,11 @@ void VirtualStudioServerDialog::OnRecord(wxCommandEvent &event)
    NewChannelGroup       mChannels;
    std::string flacFile = "/Users/nwang/work/basic-hls-server/good4u.flac";
 
+   wxFileName flacFileName(flacFile);
+   if (!flacFileName.FileExists()) {
+      std::cout << "File does not exist" << std::endl;
+   }
+
    //auto track = WaveTrackFactory::Get(*mCurrProject).Create();
    auto track = WaveTrack::New( *mCurrProject );
    track->SetRate(mServerSampleRate);
@@ -1989,8 +2031,6 @@ void VirtualStudioServerDialog::OnRecord(wxCommandEvent &event)
    char buffer[numSamples];
    infile.read(buffer, numSamples);
    track->Append((samplePtr)buffer, floatSample, numSamples);
-
-
 
    /*
    auto track = WaveTrack::New( *mCurrProject );
@@ -2027,4 +2067,56 @@ void VirtualStudioServerDialog::OnStop(wxCommandEvent &event)
 void VirtualStudioServerDialog::OnClose(wxCommandEvent &event)
 {
    Close();
+}
+
+void VirtualStudioServerDialog::OnWebStudio(wxCommandEvent &event)
+{
+   std::cout << "Clicked on web menu item" << std::endl;
+   std::string url = kApiBaseUrl + "/studios/" + mServerID + "?accessToken=" + mAccessToken;
+   VirtualStudioWebDialog dlg(this, wxID_ANY, url, mAccessToken, XO("Virtual Studio"));
+   dlg.SetSize(800, 600);
+   int retCode = dlg.ShowModal();
+   dlg.Center();
+   std::cout << "Return code: " << retCode << std::endl;
+}
+
+BEGIN_EVENT_TABLE(VirtualStudioWebDialog, wxDialogWrapper)
+   EVT_TEXT(wxID_ANY, VirtualStudioWebDialog::OnTextChange )
+   EVT_SLIDER(wxID_ANY,VirtualStudioWebDialog::OnSlider)
+END_EVENT_TABLE();
+
+VirtualStudioWebDialog::VirtualStudioWebDialog(wxWindow * parent, wxWindowID id, std::string url, std::string accessToken, const TranslatableString & title):
+   wxDialogWrapper(parent,id,title,wxDefaultPosition, wxSize(800, 600)),
+   mStyle(wxDEFAULT_DIALOG_STYLE)
+{
+   std::cout << "Yooooo " << url << std::endl;
+   SetName();
+   mBrowser = wxWebView::New(this, wxID_ANY);
+   mBrowser->LoadURL(url);
+   SetSizer(nullptr);
+   DoLayout();
+}
+
+VirtualStudioWebDialog::~VirtualStudioWebDialog()
+{
+}
+
+void VirtualStudioWebDialog::DoLayout()
+{
+   std::cout << "DoLayout" << std::endl;
+   if (mBrowser) {
+      mBrowser->SetSize(GetClientSize());
+   }
+   wxDialogWrapper::DoLayout();
+}
+
+
+void VirtualStudioWebDialog::OnTextChange(wxCommandEvent &event)
+{
+   std::cout << "OnTextChange" << std::endl;
+}
+
+void VirtualStudioWebDialog::OnSlider(wxCommandEvent &event)
+{
+   std::cout << "OnSlider" << std::endl;
 }
