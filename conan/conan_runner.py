@@ -102,6 +102,7 @@ if __name__ == '__main__':
                 '--build='*'' if args.force_build else '--build=missing',
                 '--output-folder', args.build_dir,
                 '--remote', 'audacity-recipes-conan2' if (args.force_build or args.disallow_prebuilt) else 'audacity-binaries-conan2',
+                '--remote', 'conancenter',
                 '--profile:build', profiles.build_profile_path,
                 '--profile:host', host_profile,
             ]

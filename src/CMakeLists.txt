@@ -1104,6 +1104,8 @@ list( APPEND LDFLAGS
       $<$<CXX_COMPILER_ID:GNU>:-Wl,--disable-new-dtags>
 )
 
+find_package( websocketpp )
+
 find_package( Threads QUIET )
 #
 #

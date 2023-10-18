@@ -49,6 +49,8 @@ class AudacityDependency:
                 setattr(package, key, value)
 
     def reference(self, conanfile):
+        if self.name == "websocketpp":
+            return f"{self.name}/{self.version}"
         return f"{self.name}/{self.version}@{self.channel}" if self.channel else f"{self.name}/{self.version}@audacity/stable"
 
     def copy_files(self, conanfile, dependency_info):
@@ -178,6 +180,7 @@ class AudacityConan(ConanFile):
         CurlDependency(),
 
         AudacityDependency("rapidjson", "1.1.0"),
+        AudacityDependency("websocketpp", "0.8.2"),
 
         AudacityDependency("breakpad", "2023.01.27"),
 

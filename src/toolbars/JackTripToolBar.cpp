@@ -1177,6 +1177,7 @@ void JackTripToolBar::OnRecord(wxCommandEvent& event)
 {
    std::cout << "OnRecord called" << std::endl;
 
+   /*
    std::string flacFile = "/Users/nwang/work/basic-hls-server/good4u.flac";
    VSFLACImportFileHandle flacHandle(flacFile);
    auto &trackFactory = WaveTrackFactory::Get( mProject );
@@ -1184,6 +1185,7 @@ void JackTripToolBar::OnRecord(wxCommandEvent& event)
 
    TrackHolders newTracks;
    flacHandle.ImportForVS(newTracks);
+   */
 
    /*
    double sampleRate = 48000;
@@ -1980,6 +1982,13 @@ void VirtualStudioServerDialog::OnRecord(wxCommandEvent &event)
    NewChannelGroup       mChannels;
    std::string flacFile = "/Users/nwang/work/basic-hls-server/good4u.flac";
 
+   wxFileName flacFileName(flacFile);
+   if (!flacFileName.FileExists()) {
+      std::cout << "File does not exist" << std::endl;
+   }
+
+   return;
+   /*
    //auto track = WaveTrackFactory::Get(*mCurrProject).Create();
    auto track = WaveTrack::New( *mCurrProject );
    track->SetRate(mServerSampleRate);
@@ -1989,8 +1998,7 @@ void VirtualStudioServerDialog::OnRecord(wxCommandEvent &event)
    char buffer[numSamples];
    infile.read(buffer, numSamples);
    track->Append((samplePtr)buffer, floatSample, numSamples);
-
-
+   */
 
    /*
    auto track = WaveTrack::New( *mCurrProject );
