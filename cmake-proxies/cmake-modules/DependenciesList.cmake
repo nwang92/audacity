@@ -61,6 +61,9 @@ if( ${_OPT}has_networking )
 endif()
 
 audacity_find_package(RapidJSON REQUIRED)
+audacity_find_package(websocketpp REQUIRED)
+audacity_find_package(Boost REQUIRED)
+audacity_find_package(OpenSSL REQUIRED)
 
 audacity_find_package(PortMidi OPTION_NAME midi)
 

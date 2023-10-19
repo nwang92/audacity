@@ -49,8 +49,6 @@ class AudacityDependency:
                 setattr(package, key, value)
 
     def reference(self, conanfile):
-        if self.name == "websocketpp":
-            return f"{self.name}/{self.version}"
         return f"{self.name}/{self.version}@{self.channel}" if self.channel else f"{self.name}/{self.version}@audacity/stable"
 
     def copy_files(self, conanfile, dependency_info):
@@ -125,6 +123,35 @@ class PortAudioDependency(AudacityDependency):
         if conanfile.settings.os != "Macos":
             package.with_jack = conanfile.options.use_jack
 
+@dataclass
+class WebSocketPPDependency(AudacityDependency):
+    def __init__(self, package_options: dict = None):
+        super().__init__("websocketpp", "0.8.2", package_options=package_options)
+
+    def reference(self, conanfile):
+        return f"{self.name}/{self.version}"
+
+    def apply_options(self, conanfile, package):
+        super().apply_options(conanfile, package)
+        package.asio = "boost"
+        package.with_openssl = True
+        package.with_zlib = False
+
+@dataclass
+class OpenSSLDependency(AudacityDependency):
+    def __init__(self, package_options: dict = None):
+        super().__init__("openssl", "3.1.3", package_options=package_options)
+
+    def reference(self, conanfile):
+        return f"{self.name}/{self.version}"
+
+@dataclass
+class BoostDependency(AudacityDependency):
+    def __init__(self, package_options: dict = None):
+        super().__init__("boost", "1.83.0", package_options=package_options)
+
+    def reference(self, conanfile):
+        return f"{self.name}/{self.version}"
 
 # Curl needs the propper TLS backend set
 @dataclass
@@ -180,7 +207,9 @@ class AudacityConan(ConanFile):
         CurlDependency(),
 
         AudacityDependency("rapidjson", "1.1.0"),
-        AudacityDependency("websocketpp", "0.8.2"),
+        WebSocketPPDependency(),
+        OpenSSLDependency(),
+        BoostDependency(),
 
         AudacityDependency("breakpad", "2023.01.27"),
 

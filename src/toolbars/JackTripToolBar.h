@@ -43,7 +43,8 @@
 #include "AudacityMessageBox.h"
 #include "../widgets/FileHistory.h"
 
-const std::string kApiBaseUrl = "https://app.jacktrip.org";
+const std::string kApiHost = "app.jacktrip.org";
+const std::string kApiBaseUrl = "https://" + kApiHost;
 const std::string kAuthAuthorizeUrl = "https://auth.jacktrip.org/authorize";
 const std::string kAuthTokenUrl = "https://auth.jacktrip.org/oauth/token";
 const std::string kAuthAudience = "https://api.jacktrip.org";
@@ -64,7 +65,8 @@ using NewChannelGroup = std::vector< std::shared_ptr<WaveTrack> >;
 
 class JackTripToolBar final : public ToolBar {
    static constexpr int kAudioSettings = 15800;
-   static constexpr int kTestButton = 15801;
+   static constexpr int kAuthButton = 15801;
+   static constexpr int kTestButton = 15802;
 
  public:
    static Identifier ID();
