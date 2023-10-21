@@ -17,61 +17,11 @@
 #include <thread>
 #include <chrono>
 
-#include <websocketpp/client.hpp>
-#include <websocketpp/config/asio_client.hpp>
-
-using Client = websocketpp::client<websocketpp::config::asio_tls_client>;
-using ConnectionHdl = websocketpp::connection_hdl;
-using SslContext = websocketpp::lib::asio::ssl::context;
-using websocketpp::lib::placeholders::_1;
-using websocketpp::lib::placeholders::_2;
-
-void on_message(Client* client, ConnectionHdl hdl,
-                websocketpp::config::asio_client::message_type::ptr msg) {
-  std::cout << "on_message: " << msg->get_payload() << std::endl;
-  //client->close(hdl, websocketpp::close::status::normal, "done");
-}
-
-void on_open(Client* client, ConnectionHdl hdl) {
-  std::string msg{"hello"};
-  std::cout << "on_open: send " << msg << std::endl;
-  //client->send(hdl, msg, websocketpp::frame::opcode::text);
-}
-
-websocketpp::lib::shared_ptr<SslContext> on_tls_init() {
-  auto ctx = websocketpp::lib::make_shared<SslContext>(
-      boost::asio::ssl::context::sslv23);
-  return ctx;
-}
-
-void turn_off_logging(Client& client) {
-  client.clear_access_channels(websocketpp::log::alevel::all);
-  client.clear_error_channels(websocketpp::log::elevel::all);
-}
-
-void set_message_handler(Client& client) {
-  client.set_message_handler(
-      websocketpp::lib::bind(&on_message, &client, ::_1, ::_2));
-}
-
-void set_open_handler(Client& client) {
-  client.set_open_handler(websocketpp::lib::bind(&on_open, &client, ::_1));
-}
-
-void set_tls_init_handler(Client& client) {
-  client.set_tls_init_handler(websocketpp::lib::bind(&on_tls_init));
-}
-
-void set_url(Client& client, std::string url) {
-  websocketpp::lib::error_code ec;
-  auto connection = client.get_connection(url, ec);
-  connection->append_header("Origin", "https://app.jacktrip.org");
-  client.connect(connection);
-}
-
 #include <wx/app.h>
 #include <wx/log.h>
+#include <wx/colour.h>
 #include <wx/sizer.h>
+#include <wx/splitter.h>
 #include <wx/tooltip.h>
 #include <wx/filename.h>
 #include <wx/zipstrm.h>
@@ -90,8 +40,6 @@ void set_url(Client& client, std::string url) {
 #include <wx/defs.h>
 #include <wx/file.h>
 #include <wx/ffile.h>
-
-#include "wxPanelWrapper.h"
 
 #include "../ActiveProject.h"
 
@@ -1173,7 +1121,6 @@ void JackTripToolBar::AppendStudiosSubMenu(JackTripToolBar &toolbar,
    //   menuItem->Enable(false);
 }
 
-
 void JackTripToolBar::JackTripRecordingChoices::AppendSubMenu(JackTripToolBar &toolBar,
    wxMenu &menu, std::string serverID, JackTripCallback callback, const wxString &title)
 {
@@ -1196,10 +1143,36 @@ void JackTripToolBar::OnRescannedDevices(DeviceChangeMessage m)
 void JackTripToolBar::OnStudio(std::string serverID, int id)
 {
    wxLogInfo("Clicked on %d for serverID %s", id, serverID);
-   std::cout << "Clicked on " << serverID << std::endl;
-   VirtualStudioServerDialog dlg(this, &mProject, serverID, mAccessToken);
-   int retCode = dlg.ShowModal();
-   dlg.Center();
+   ToggleStudioPanel(serverID);
+}
+
+void JackTripToolBar::ToggleStudioPanel(std::string serverID)
+{
+   auto &pw = ProjectWindow::Get( mProject );
+   auto containerWindow = pw.GetContainerWindow();
+   auto trackWindow = pw.GetTrackListWindow();
+
+   if (mSidePanel) {
+      containerWindow->Unsplit(mSidePanel);
+      mSidePanel = nullptr;
+   } else {
+      mSidePanel = safenew VirtualStudioServerPanel(
+         this,
+         containerWindow,
+         &mProject,
+         serverID,
+         mAccessToken,
+         wxID_ANY,
+         wxDefaultPosition,
+         wxDefaultSize,
+         0
+      );
+      mSidePanel->SetSizer( safenew wxBoxSizer(wxVERTICAL) );
+      mSidePanel->SetLabel("Side Panel");
+      mSidePanel->SetLayoutDirection(wxLayout_LeftToRight);
+      mSidePanel->SetBackgroundColour(*wxRED);
+      containerWindow->SplitVertically(mSidePanel, trackWindow, 300);
+   }
 }
 
 void JackTripToolBar::OnRecording(std::string serverID, int id)
@@ -1281,6 +1254,7 @@ void JackTripToolBar::OnRecord(wxCommandEvent& event)
    mIsRecording = true;
    */
 }
+
 void JackTripToolBar::OnAuth(wxCommandEvent& event)
 {
    VirtualStudioAuthDialog dlg(this, &mAccessToken);
@@ -1868,22 +1842,34 @@ void VirtualStudioAuthDialog::OnClose(wxCommandEvent &event)
    Close();
 }
 
-BEGIN_EVENT_TABLE(VirtualStudioServerDialog, wxDialogWrapper)
-   EVT_BUTTON(JoinButtonID, VirtualStudioServerDialog::OnJoin)
-   EVT_BUTTON(RecordingButtonID, VirtualStudioServerDialog::OnRecord)
-   EVT_BUTTON(StopButtonID, VirtualStudioServerDialog::OnStop)
-   EVT_BUTTON(CloseStudioButtonID, VirtualStudioServerDialog::OnClose)
+BEGIN_EVENT_TABLE(VirtualStudioServerPanel, wxPanelWrapper)
+   EVT_BUTTON(JoinButtonID, VirtualStudioServerPanel::OnJoin)
+   EVT_BUTTON(RecordingButtonID, VirtualStudioServerPanel::OnRecord)
+   EVT_BUTTON(StopButtonID, VirtualStudioServerPanel::OnStop)
+   EVT_BUTTON(CloseStudioButtonID, VirtualStudioServerPanel::OnClose)
 END_EVENT_TABLE();
 
-VirtualStudioServerDialog::VirtualStudioServerDialog(wxWindow* parent, AudacityProject* projectPtr, std::string serverID, std::string accessToken):
-   wxDialogWrapper(parent, wxID_ANY, XO("Join Virtual Studio"), wxDefaultPosition, { 480, -1 }, wxDEFAULT_DIALOG_STYLE)
+VirtualStudioServerPanel::VirtualStudioServerPanel(JackTripToolBar* toolbar,
+                                                   wxWindow* parent,
+                                                   AudacityProject* projectPtr,
+                                                   std::string serverID,
+                                                   std::string accessToken,
+                                                   wxWindowID winid,
+                                                   const wxPoint& pos,
+                                                   const wxSize& size,
+                                                   long style):
+   wxPanelWrapper(parent, winid, pos, size, style)
 {
+   mToolbar = toolbar;
    mServerID = serverID;
    mAccessToken = accessToken;
    mCurrProject = projectPtr;
    if (!mServerID.empty() && !mAccessToken.empty()) {
-      FetchServer();
+      std::cout << "Starting websocket" << std::endl;
+      InitializeWebsocket();
+      std::cout << "Started websocket" << std::endl;
 
+      /*
       Client client;
       //turn_off_logging(client);
       client.init_asio();
@@ -1896,16 +1882,69 @@ VirtualStudioServerDialog::VirtualStudioServerDialog(wxWindow* parent, AudacityP
 
       websocketpp::lib::thread t1(&Client::run, &client);
       t1.join();
+      */
    }
 }
 
-VirtualStudioServerDialog::~VirtualStudioServerDialog()
+VirtualStudioServerPanel::~VirtualStudioServerPanel()
 {
+   std::cout << "Stopping websocket" << std::endl;
+   mServerThread.interrupt();
+   mServerThread.join();
+   std::cout << "Stopped websocket" << std::endl;
+
    mServerID = "";
    mAccessToken = "";
 }
 
-void VirtualStudioServerDialog::DoLayout()
+void VirtualStudioServerPanel::OnServerWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg)
+{
+   using namespace rapidjson;
+
+   auto payload = msg->get_payload();
+
+   Document document;
+   document.Parse(payload.c_str());
+   // Check for parse errors
+   if (document.HasParseError()) {
+      wxLogInfo("Error parsing JSON: %s", document.GetParseError());
+      return;
+   }
+
+   mServerName = document["name"].GetString();
+   mServerBannerUrl = document["bannerURL"].GetString();
+   mServerSessionID = document["sessionId"].GetString();
+   mServerStatus = document["status"].GetString();
+   mServerSampleRate = document["sampleRate"].GetDouble();
+   mServerEnabled = document["enabled"].GetBool();
+
+   std::cout << std::endl;
+   std::cout << mServerName << std::endl;
+   std::cout << mServerBannerUrl << std::endl;
+   std::cout << mServerSessionID << std::endl;
+   std::cout << mServerStatus << std::endl;
+   std::cout << mServerSampleRate << std::endl;
+   std::cout << mServerEnabled << std::endl;
+
+   wxTheApp->CallAfter([this]{ DoLayout(); });
+  //client->close(hdl, websocketpp::close::status::normal, "done");
+}
+
+void VirtualStudioServerPanel::OnWssOpen(ConnectionHdl hdl)
+{
+   std::cout << "nay" << std::endl;
+  //std::string msg{"hello"};
+  //std::cout << "on_open: send " << msg << std::endl;
+  //client->send(hdl, msg, websocketpp::frame::opcode::text);
+}
+
+websocketpp::lib::shared_ptr<SslContext> VirtualStudioServerPanel::OnTlsInit()
+{
+   auto ctx = websocketpp::lib::make_shared<SslContext>(boost::asio::ssl::context::sslv23);
+   return ctx;
+};
+
+void VirtualStudioServerPanel::DoLayout()
 {
    ShuttleGui s(this, eIsCreating);
 
@@ -1972,15 +2011,15 @@ void VirtualStudioServerDialog::DoLayout()
 
    Layout();
    Fit();
-   Centre();
+   //Centre();
 }
 
-void VirtualStudioServerDialog::UpdateLayout()
+void VirtualStudioServerPanel::UpdateLayout()
 {
    std::cout << "UpdateLayout called" << std::endl;
 }
 
-void VirtualStudioServerDialog::FetchServer()
+void VirtualStudioServerPanel::FetchServer()
 {
    audacity::network_manager::Request request(kApiBaseUrl + "/api/servers/" + mServerID);
    request.setHeader("Authorization", "Bearer " + mAccessToken);
@@ -2028,7 +2067,68 @@ void VirtualStudioServerDialog::FetchServer()
    );
 }
 
-void VirtualStudioServerDialog::OnJoin(wxCommandEvent &event)
+void VirtualStudioServerPanel::DisableLogging(WSSClient& client)
+{
+   client.clear_access_channels(websocketpp::log::alevel::all);
+   client.clear_error_channels(websocketpp::log::elevel::all);
+}
+
+void VirtualStudioServerPanel::SetUrl(WSSClient& client, std::string url)
+{
+   websocketpp::lib::error_code ec;
+   auto connection = client.get_connection(url, ec);
+   if (ec) {
+      std::cout << "error " << ec << std::endl;
+      return;
+   }
+   connection->append_header("Origin", "https://app.jacktrip.org");
+   client.connect(connection);
+}
+
+void VirtualStudioServerPanel::InitializeWebsocket()
+{
+   mServerThread = boost::thread([&]
+   {
+      WSSClient client;
+      DisableLogging(client);
+      client.init_asio();
+      client.set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioServerPanel::OnTlsInit));
+      client.set_open_handler(websocketpp::lib::bind(&VirtualStudioServerPanel::OnWssOpen, this, ::_1));
+      client.set_message_handler(websocketpp::lib::bind(&VirtualStudioServerPanel::OnServerWssMessage, this, ::_1, ::_2));
+      std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "?auth_code=" + mAccessToken;
+      //std::cout << "URL is: " << url << std::endl;
+      SetUrl(client, url);
+
+      try {
+         client.run();
+      } catch (websocketpp::exception const & e) {
+         std::cout << e.what() << std::endl;
+      } catch (std::exception const & e) {
+         std::cout << e.what() << std::endl;
+      } catch (...) {
+         std::cout << "other exception" << std::endl;
+      }
+   });
+
+   mServerThread.detach();
+   /* This is the way the docs suggest doing this but it didn't work for me...
+   WSSClient client;
+   turn_off_logging(client);
+   client.init_asio();
+   client.start_perpetual();
+
+   set_tls_init_handler(client);
+   set_open_handler(client);
+   set_message_handler(client);
+   std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "?auth_code=" + mAccessToken;
+   std::cout << "URL is: " << url << std::endl;
+   set_url(client, url);
+   mThread.reset(new websocketpp::lib::thread(&WSSClient::run, &client));
+   mThread->detach();
+   */
+}
+
+void VirtualStudioServerPanel::OnJoin(wxCommandEvent &event)
 {
    if (mServerID.empty()) {
       return;
@@ -2037,7 +2137,7 @@ void VirtualStudioServerDialog::OnJoin(wxCommandEvent &event)
    BasicUI::OpenInDefaultBrowser(url);
 }
 
-void VirtualStudioServerDialog::OnRecord(wxCommandEvent &event)
+void VirtualStudioServerPanel::OnRecord(wxCommandEvent &event)
 {
    if (mServerID.empty()) {
       return;
@@ -2087,7 +2187,7 @@ void VirtualStudioServerDialog::OnRecord(wxCommandEvent &event)
    */
 }
 
-void VirtualStudioServerDialog::OnStop(wxCommandEvent &event)
+void VirtualStudioServerPanel::OnStop(wxCommandEvent &event)
 {
    auto &projectAudioManager = ProjectAudioManager::Get( *mCurrProject );
    bool canStop = projectAudioManager.CanStopAudioStream();
@@ -2097,7 +2197,12 @@ void VirtualStudioServerDialog::OnStop(wxCommandEvent &event)
    mIsRecording = false;
 }
 
-void VirtualStudioServerDialog::OnClose(wxCommandEvent &event)
+void VirtualStudioServerPanel::OnClose(wxCommandEvent &event)
 {
-   Close();
+   std::cout << "Stopping websocket" << std::endl;
+   mServerThread.interrupt();
+   mServerThread.join();
+   std::cout << "Stopped websocket" << std::endl;
+   mToolbar->ToggleStudioPanel(mServerID);
+   //Close();
 }

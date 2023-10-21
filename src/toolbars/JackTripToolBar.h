@@ -21,6 +21,7 @@
 #include <optional>
 #include <vector>
 #include <fstream>
+#include <boost/thread/thread.hpp>
 
 #ifdef HAS_NETWORKING
 #include "NetworkManager.h"
@@ -39,9 +40,19 @@
 #include "Observer.h"
 #include "MemoryX.h"
 #include "WaveTrack.h"
+#include "wxPanelWrapper.h" // to inherit
 //#include "../widgets/MeterPanel.h"
 #include "AudacityMessageBox.h"
+#include "ProjectWindow.h"
 #include "../widgets/FileHistory.h"
+#include <websocketpp/client.hpp>
+#include <websocketpp/config/asio_client.hpp>
+
+using WSSClient = websocketpp::client<websocketpp::config::asio_tls_client>;
+using ConnectionHdl = websocketpp::connection_hdl;
+using SslContext = websocketpp::lib::asio::ssl::context;
+using websocketpp::lib::placeholders::_1;
+using websocketpp::lib::placeholders::_2;
 
 const std::string kApiHost = "app.jacktrip.org";
 const std::string kApiBaseUrl = "https://" + kApiHost;
@@ -57,7 +68,7 @@ class wxMenu;
 class wxString;
 class wxButton;
 class VirtualStudioAuthDialog;
-class VirtualStudioServerDialog;
+class VirtualStudioServerPanel;
 class VSFLACImportFileHandle;
 class MyVSFLACFile;
 struct DeviceSourceMap;
@@ -89,6 +100,7 @@ class JackTripToolBar final : public ToolBar {
    void ReCreateButtons() override;
    void OnFocus(wxFocusEvent &event);
    void OnAudioSetup(wxCommandEvent &event);
+   void ToggleStudioPanel(std::string serverID);
 
  private:
    void OnRescannedDevices(DeviceChangeMessage);
@@ -286,6 +298,8 @@ class JackTripToolBar final : public ToolBar {
    std::map<std::string, JackTripRecordingChoices> mServerIdToRecordings;
    std::string mDownloadFile;
    std::ofstream mDownloadOutput;
+   // other
+   wxWindow* mSidePanel{};
 
    Observer::Subscription mSubscription;
 
@@ -335,27 +349,42 @@ class VirtualStudioAuthDialog final : public wxDialogWrapper
    DECLARE_EVENT_TABLE()
 };
 
-class VirtualStudioServerDialog final : public wxDialogWrapper
-{
+class VirtualStudioServerPanel final : public wxPanelWrapper {
  public:
-   VirtualStudioServerDialog(wxWindow* parent, AudacityProject* projectPtr, std::string serverID, std::string accessToken);
-   ~VirtualStudioServerDialog();
+   VirtualStudioServerPanel(
+         JackTripToolBar* toolbar,
+         wxWindow *parent,
+         AudacityProject* projectPtr,
+         std::string serverID,
+         std::string accessToken,
+         wxWindowID winid = wxID_ANY,
+         const wxPoint& pos = wxDefaultPosition,
+         const wxSize& size = wxDefaultSize,
+         long style = wxTAB_TRAVERSAL | wxNO_BORDER);
+
+   ~VirtualStudioServerPanel();
+   void OnServerWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg);
+   void OnWssOpen(ConnectionHdl hdl);
+   static websocketpp::lib::shared_ptr<SslContext> OnTlsInit();
 
  private:
    void DoLayout();
    void UpdateLayout();
 
    void FetchServer();
-
+   void InitializeWebsocket();
    void OnJoin(wxCommandEvent &event);
    void OnRecord(wxCommandEvent &event);
    void OnStop(wxCommandEvent &event);
    void OnClose(wxCommandEvent &event);
+   void DisableLogging(WSSClient& client);
+   void SetUrl(WSSClient& client, std::string url);
 
    wxButton *mJoin;
    wxButton *mRecord;
    wxButton *mStop;
    wxButton *mClose;
+   boost::thread mServerThread;
 
    std::string mServerID;
    std::string mServerName;
@@ -368,6 +397,7 @@ class VirtualStudioServerDialog final : public wxDialogWrapper
 
    std::string mAccessToken;
    AudacityProject *mCurrProject;
+   JackTripToolBar *mToolbar;
 
  public:
    DECLARE_EVENT_TABLE()
