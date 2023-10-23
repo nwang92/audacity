@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <math.h>
 #include <memory>
 #include <wx/scrolwin.h>
 #include <wx/weakref.h>
@@ -27,6 +28,7 @@
 #endif
 #include <rapidjson/document.h>
 
+#include "./widgets/MeterPanel.h"
 #include "ThemedWrappers.h"
 #include "Observer.h"
 
@@ -48,27 +50,6 @@ class wxBitmapButton;
 class VirtualStudioParticipantListWindow;
 class AudacityProject;
 
-class StudioParticipant {
-public:
-   StudioParticipant(wxWindow* parent, std::string id, std::string name, std::string picture, float volume);
-   ~StudioParticipant();
-
-   std::string GetID();
-   std::string GetName();
-   std::string GetPicture();
-   float GetVolume();
-   void UpdateVolume(float volume);
-   void SetIndex(int idx);
-
-private:
-   wxWindow* mParent;
-   std::string mID;
-   std::string mName;
-   std::string mPicture;
-   int mIndex;
-   float mVolume;
-};
-
 //! Notification of changes in individual participants of StudioParticipantMap, or of StudioParticipantMap's composition
 struct ParticipantEvent
 {
@@ -85,6 +66,9 @@ struct ParticipantEvent
       //! Posted when tracks are reordered but otherwise unchanged.
       /*! mpTrack points to the moved track that is earliest in the New ordering. */
       PERMUTED,
+
+      // Posted when volume is changed
+      VOLUME_CHANGE,
 
       //! Posted when some track changed its height.
       RESIZING,
@@ -111,6 +95,31 @@ struct ParticipantEvent
    const int mExtra;
 };
 
+class StudioParticipant final
+   : public Observer::Publisher<ParticipantEvent>
+{
+public:
+   StudioParticipant(wxWindow* parent, std::string id, std::string name, std::string picture, float volume);
+   ~StudioParticipant();
+
+   std::string GetID();
+   std::string GetName();
+   std::string GetPicture();
+   float GetVolume();
+   void UpdateVolume(float volume);
+   void SetIndex(int idx);
+   void QueueEvent(ParticipantEvent event);
+
+private:
+   wxWindow* mParent;
+   std::string mID;
+   std::string mName;
+   std::string mPicture;
+   std::unique_ptr<wxBitmap> mBitmap;
+   int mIndex;
+   float mVolume;
+};
+
 class StudioParticipantMap final
    : public Observer::Publisher<ParticipantEvent>
 {
@@ -118,8 +127,8 @@ public:
    StudioParticipantMap(wxWindow* parent);
    ~StudioParticipantMap();
 
-   std::map<std::string, StudioParticipant*> GetMap();
-   StudioParticipant* GetParticipantByID(std::string id);
+   std::map<std::string, std::shared_ptr<StudioParticipant>> GetMap();
+   std::shared_ptr<StudioParticipant> GetParticipantByID(std::string id);
    void AddParticipant(std::string id, std::string name, std::string picture, float volume);
    void UpdateParticipantVolume(std::string id, float volume);
    unsigned long GetParticipantsCount();
@@ -128,7 +137,7 @@ public:
 
 private:
    wxWindow* mParent;
-   std::map<std::string, StudioParticipant*> mMap;
+   std::map<std::string, std::shared_ptr<StudioParticipant>> mMap;
 };
 
 /**

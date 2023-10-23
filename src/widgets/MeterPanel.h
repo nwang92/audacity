@@ -165,6 +165,8 @@ class AUDACITY_DLL_API MeterPanel final
    void UpdateDisplay(unsigned numChannels,
                       int numFrames, const float *sampleData) override;
 
+   void SetDB(unsigned numChannels, int numFrames, float db);
+
    // Vaughan, 2010-11-29: This not currently used. See comments in MixerTrackCluster::UpdateMeter().
    //void UpdateDisplay(int numChannels, int numFrames,
    //                     // Need to make these double-indexed max and min arrays if we handle more than 2 channels.
@@ -202,7 +204,7 @@ class AUDACITY_DLL_API MeterPanel final
    void Increase(float steps);
    void Decrease(float steps);
    void UpdateSliderControl();
-   
+
    void ShowMenu(const wxPoint & pos);
 
    void SetName(const TranslatableString& name);

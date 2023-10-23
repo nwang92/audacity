@@ -804,7 +804,14 @@ void JackTripToolBar::OnAudioSetup(wxCommandEvent& WXUNUSED(evt))
       }
       menu.AppendSubMenu(recordingsSubMenu, _("Import Recordings..."));
       menu.AppendSeparator();
-      mServers.AppendSubMenu(*this, menu, &JackTripToolBar::OnStudio, _("&Join Studio..."));
+
+      auto &panel = VirtualStudioPanel::Get( mProject );
+      if (panel.IsShown()) {
+         menu.Append(kDisconnectButton, _("&Disconnect"));
+         menu.Bind(wxEVT_MENU, &JackTripToolBar::OnDisconnect, this, kDisconnectButton);
+      } else {
+         mServers.AppendSubMenu(*this, menu, &JackTripToolBar::OnStudio, _("&Join Studio..."));
+      }
    }
 
    wxWindow* btn = FindWindow(ID_JACKTRIP_BUTTON);
@@ -998,6 +1005,7 @@ void JackTripToolBar::FillServers()
          }
 
          mServers.Set(std::move(serverNames), std::move(serverIds));
+         mJackTrip->Enable();
       }
    );
 }
@@ -1277,14 +1285,19 @@ void JackTripToolBar::OnRecord(wxCommandEvent& event)
 
 void JackTripToolBar::OnPanel(wxCommandEvent& event)
 {
-   std::cout << "OnPanel called" << std::endl;
    auto &panel = VirtualStudioPanel::Get( mProject );
    if (panel.IsShown()) {
       panel.HidePanel();
    } else {
       std::cout << "ShowPanel" << std::endl;
-      panel.ShowPanel("e0a1369c-3f4f-4d46-821d-69ea7139095c", "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6Ik56X1ZmZzNRWl90QUxyNE9KVU5JNSJ9.eyJpc3MiOiJodHRwczovL2F1dGguamFja3RyaXAub3JnLyIsInN1YiI6Imdvb2dsZS1vYXV0aDJ8MTA5MTQ1NzExNTMwODMwMTkwNDYzIiwiYXVkIjpbImh0dHBzOi8vYXBpLmphY2t0cmlwLm9yZyIsImh0dHBzOi8vamFja3RyaXAudXMuYXV0aDAuY29tL3VzZXJpbmZvIl0sImlhdCI6MTY5NzkyMjk5OSwiZXhwIjoxNjk4MDA5Mzk5LCJhenAiOiJZUlFuQ2g1aWgzMldRY2l1bTVHbGRsS0VEYzVXSnZwNiIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwifQ.hvk9OzzATmkVcBei_9NEwQ3rbVqroluIH-CbpuRk0ckNaDIBiNKtV5knhDwksIEqCzWgMGAfJ7MDR7tzYKBnS3Q5NYbgFfMPPwTMHFgWhgheH2pskr1zHk-qTBySlrprkL677eSicFkImJfyf3P9kZ7jORkQsNU3GHy1khYeGx-kZV5elX3z6dxa3qUaJEzE-BF4UCEqR4uToQ-exPrEbWUWRUOuC7nBfb-cHCJRRifDn7StFETiSfb5hJuC9qtpjuXzFQHBYKq6Bj0udU7sfZJIvH-Z6A9gioitMF_lgN2N-pEwAneJaHM_a4tqeTvMXCsviLIgxDuRU86bETAH5g", false);
+      panel.ShowPanel("e0a1369c-3f4f-4d46-821d-69ea7139095c", "", true);
    }
+}
+
+void JackTripToolBar::OnDisconnect(wxCommandEvent& event)
+{
+   std::cout << "OnDisconnect" << std::endl;
+   ToggleStudioPanel("");
 }
 
 void JackTripToolBar::OnAuth(wxCommandEvent& event)
@@ -1297,6 +1310,7 @@ void JackTripToolBar::OnAuth(wxCommandEvent& event)
 
    wxLogInfo("Parent access token: %s", mAccessToken);
    if (!mAccessToken.empty()) {
+      mJackTrip->Disable();
       GetUserInfo();
    }
 }
