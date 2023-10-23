@@ -13,6 +13,9 @@
 #include <memory>
 #include <wx/scrolwin.h>
 #include <wx/weakref.h>
+#include <wx/arrstr.h>
+
+#include "sha256.h"
 #include <boost/thread/thread.hpp>
 #include <websocketpp/client.hpp>
 #include <websocketpp/config/asio_client.hpp>
@@ -55,12 +58,14 @@ public:
    std::string GetPicture();
    float GetVolume();
    void UpdateVolume(float volume);
+   void SetIndex(int idx);
 
 private:
    wxWindow* mParent;
    std::string mID;
    std::string mName;
    std::string mPicture;
+   int mIndex;
    float mVolume;
 };
 
@@ -113,10 +118,11 @@ public:
    StudioParticipantMap(wxWindow* parent);
    ~StudioParticipantMap();
 
+   std::map<std::string, StudioParticipant*> GetMap();
    StudioParticipant* GetParticipantByID(std::string id);
    void AddParticipant(std::string id, std::string name, std::string picture, float volume);
    void UpdateParticipantVolume(std::string id, float volume);
-   int GetParticipantsCount();
+   unsigned long GetParticipantsCount();
    void QueueEvent(ParticipantEvent event);
    void Print();
 
@@ -154,11 +160,15 @@ class VirtualStudioPanel : public wxPanel
    std::string mServerOwnerID;
    std::string mServerStatus;
    bool mServerEnabled;
+
    boost::thread mServerThread;
    boost::thread mSubscriptionsThread;
+   boost::thread mDevicesThread;
+   boost::thread mMetersThread;
 
    StudioParticipantMap* mSubscriptionsMap{nullptr};
-
+   std::map<std::string, std::string> mDeviceToOwnerMap;
+   std::map<std::string, std::string> mOwnerToDeviceMap;
    std::vector<std::shared_ptr<SampleTrack>> mPotentiallyRemovedTracks;
 
    // VirtualStudioPanel is wrapped using ThemedWindowWrapper,
@@ -208,6 +218,8 @@ private:
 
    void OnServerWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg);
    void OnSubscriptionWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg);
+   void OnDeviceWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg);
+   void OnMeterWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg);
    void OnWssOpen(ConnectionHdl hdl);
    static websocketpp::lib::shared_ptr<SslContext> OnTlsInit();
    void DisableLogging(WSSClient& client);
@@ -216,5 +228,8 @@ private:
    void StopWebsockets();
    void InitServerWebsocket();
    void InitSubscriptionsWebsocket();
+   void InitDevicesWebsocket();
+   void InitMetersWebsocket();
+   void StopMetersWebsocket();
    void FetchOwner(std::string ownerID);
 };

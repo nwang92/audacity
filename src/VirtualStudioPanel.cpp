@@ -155,7 +155,7 @@ namespace
          });
    }
    //fwd
-   class RealtimeEffectControl;
+   class ParticipantControl;
 
    class DropHintLine : public wxWindow
    {
@@ -228,10 +228,10 @@ namespace
    };
 
 #if wxUSE_ACCESSIBILITY
-   class RealtimeEffectControlAx : public wxAccessible
+   class ParticipantControlAx : public wxAccessible
    {
    public:
-      RealtimeEffectControlAx(wxWindow* win = nullptr) : wxAccessible(win) { }
+      ParticipantControlAx(wxWindow* win = nullptr) : wxAccessible(win) { }
 
       wxAccStatus GetName(int childId, wxString* name) override
       {
@@ -303,10 +303,10 @@ namespace
    };
 
    //UI control that represents individual effect from the effect list
-   class RealtimeEffectControl : public ListNavigationEnabled<MovableControl>
+   class ParticipantControl : public ListNavigationEnabled<MovableControl>
    {
       wxWeakRef<AudacityProject> mProject;
-      std::shared_ptr<SampleTrack> mTrack;
+      std::shared_ptr<StudioParticipant> mParticipant;
       std::shared_ptr<RealtimeEffectState> mEffectState;
       std::shared_ptr<EffectSettingsAccess> mSettingsAccess;
 
@@ -319,9 +319,9 @@ namespace
       Observer::Subscription mSubscription;
 
    public:
-      RealtimeEffectControl() = default;
+      ParticipantControl() = default;
 
-      RealtimeEffectControl(wxWindow* parent,
+      ParticipantControl(wxWindow* parent,
                    RealtimeEffectPicker* effectPicker,
                    wxWindowID winid,
                    const wxPoint& pos = wxDefaultPosition,
@@ -342,9 +342,9 @@ namespace
          MovableControl::SetBackgroundStyle(wxBG_STYLE_PAINT);
          MovableControl::Create(parent, winid, pos, size, wxNO_BORDER | wxWANTS_CHARS);
 
-         Bind(wxEVT_PAINT, &RealtimeEffectControl::OnPaint, this);
-         Bind(wxEVT_SET_FOCUS, &RealtimeEffectControl::OnFocusChange, this);
-         Bind(wxEVT_KILL_FOCUS, &RealtimeEffectControl::OnFocusChange, this);
+         Bind(wxEVT_PAINT, &ParticipantControl::OnPaint, this);
+         Bind(wxEVT_SET_FOCUS, &ParticipantControl::OnFocusChange, this);
+         Bind(wxEVT_KILL_FOCUS, &ParticipantControl::OnFocusChange, this);
 
          auto sizer = std::make_unique<wxBoxSizer>(wxHORIZONTAL);
 
@@ -372,14 +372,14 @@ namespace
          optionsButton->SetBackgroundColorIndex(clrEffectListItemBackground);
          optionsButton->SetForegroundColorIndex(clrTrackPanelText);
          optionsButton->SetButtonType(AButton::TextButton);
-         optionsButton->Bind(wxEVT_BUTTON, &RealtimeEffectControl::OnOptionsClicked, this);
+         optionsButton->Bind(wxEVT_BUTTON, &ParticipantControl::OnOptionsClicked, this);
 
          //Remove/replace effect
          auto changeButton = safenew ThemedAButtonWrapper<AButton>(this);
          changeButton->SetImageIndices(0, bmpMoreNormal, bmpMoreHover, bmpMoreDown, bmpMoreHover, bmpMoreDisabled);
          changeButton->SetBackgroundColorIndex(clrEffectListItemBackground);
          changeButton->SetTranslatableLabel(XO("Replace effect"));
-         changeButton->Bind(wxEVT_BUTTON, &RealtimeEffectControl::OnChangeButtonClicked, this);
+         changeButton->Bind(wxEVT_BUTTON, &ParticipantControl::OnChangeButtonClicked, this);
 
          auto dragArea = safenew wxStaticBitmap(this, wxID_ANY, theTheme.Bitmap(bmpDragArea));
          dragArea->Disable();
@@ -396,7 +396,7 @@ namespace
          SetSizer(vSizer.release());
 
 #if wxUSE_ACCESSIBILITY
-         SetAccessible(safenew RealtimeEffectControlAx(this));
+         SetAccessible(safenew ParticipantControlAx(this));
 #endif
       }
 
@@ -408,20 +408,23 @@ namespace
       //! @pre `mEffectState != nullptr`
       TranslatableString GetEffectName() const
       {
+         return XO("missing");
+         /*
          const auto &ID = mEffectState->GetID();
          const auto desc = GetPlugin(ID);
          return desc
             ? desc->GetSymbol().Msgid()
             : XO("%s (missing)")
                .Format(PluginManager::GetEffectNameFromID(ID).GET());
+         */
       }
 
-      void SetEffect(AudacityProject& project,
-         const std::shared_ptr<SampleTrack>& track,
-         const std::shared_ptr<RealtimeEffectState> &pState)
+      void SetParticipant(AudacityProject& project,
+         const std::shared_ptr<StudioParticipant>& participant)
       {
          mProject = &project;
-         mTrack = track;
+         mParticipant = participant;
+         /*
          mEffectState = pState;
 
          mSubscription = mEffectState->Subscribe([this](RealtimeEffectStateChange state) {
@@ -449,40 +452,49 @@ namespace
             mOptionsButton->SetTranslatableLabel(label);
             mOptionsButton->SetEnabled(pState && GetPlugin(pState->GetID()));
          }
+         */
       }
 
       void RemoveFromList()
       {
-         if(mProject == nullptr || mEffectState == nullptr)
+         std::cout << "RemoveFromList" << std::endl;
+         if (mProject == nullptr || mParticipant == nullptr) {
             return;
+         }
 
-         auto& ui = RealtimeEffectStateUI::Get(*mEffectState);
-         // Don't need autosave for the effect that is being removed
-         ui.Hide();
+         // if(mProject == nullptr || mEffectState == nullptr)
+         //    return;
 
-         auto effectName = GetEffectName();
-         //After AudioIO::RemoveState call this will be destroyed
-         auto project = mProject.get();
-         auto trackName = mTrack->GetName();
+         // auto& ui = RealtimeEffectStateUI::Get(*mEffectState);
+         // // Don't need autosave for the effect that is being removed
+         // ui.Hide();
 
-         AudioIO::Get()->RemoveState(*project, &*mTrack, mEffectState);
-         ProjectHistory::Get(*project).PushState(
-            /*! i18n-hint: undo history record
-             first parameter - realtime effect name
-             second parameter - track name
-             */
-            XO("Removed %s from %s").Format(effectName, trackName),
-            /*! i18n-hint: undo history record
-             first parameter - realtime effect name */
-            XO("Remove %s").Format(effectName)
-         );
+         // auto effectName = GetEffectName();
+         // //After AudioIO::RemoveState call this will be destroyed
+         // auto project = mProject.get();
+         // auto trackName = mTrack->GetName();
+
+         // AudioIO::Get()->RemoveState(*project, &*mTrack, mEffectState);
+         // ProjectHistory::Get(*project).PushState(
+         //    /*! i18n-hint: undo history record
+         //     first parameter - realtime effect name
+         //     second parameter - track name
+         //     */
+         //    XO("Removed %s from %s").Format(effectName, trackName),
+         //    /*! i18n-hint: undo history record
+         //     first parameter - realtime effect name */
+         //    XO("Remove %s").Format(effectName)
+         // );
       }
 
       void OnOptionsClicked(wxCommandEvent& event)
       {
-         if(mProject == nullptr || mEffectState == nullptr)
-            return;//not initialized
+         std::cout << "OnOptionsClicked" << std::endl;
+         if (mProject == nullptr || mParticipant == nullptr) {
+            return;
+         }
 
+         /*
          const auto ID = mEffectState->GetID();
          const auto effectPlugin = EffectManager::Get().GetEffect(ID);
 
@@ -496,54 +508,61 @@ namespace
 
          effectStateUI.UpdateTrackData(*mTrack);
          effectStateUI.Toggle( *mProject );
+         */
       }
 
       void OnChangeButtonClicked(wxCommandEvent& event)
       {
-         if(!mTrack || mProject == nullptr)
-            return;
-         if(mEffectState == nullptr)
-            return;//not initialized
-
-         const auto effectID = mEffectPicker->PickEffect(mChangeButton, mEffectState->GetID());
-         if(!effectID)
-            return;//nothing
-
-         if(effectID->empty())
-         {
-            RemoveFromList();
+         std::cout << "OnChangeButtonClicked" << std::endl;
+         if (mProject == nullptr || mParticipant == nullptr) {
             return;
          }
 
-         auto &em = RealtimeEffectManager::Get(*mProject);
-         auto oIndex = em.FindState(&*mTrack, mEffectState);
-         if (!oIndex)
-            return;
+         // if(!mTrack || mProject == nullptr)
+         //    return;
+         // if(mEffectState == nullptr)
+         //    return;//not initialized
 
-         auto oldName = GetEffectName();
-         auto &project = *mProject;
-         auto trackName = mTrack->GetName();
-         if (auto state = AudioIO::Get()
-            ->ReplaceState(project, &*mTrack, *oIndex, *effectID)
-         ){
-            // Message subscription took care of updating the button text
-            // and destroyed `this`!
-            auto effect = state->GetEffect();
-            assert(effect); // postcondition of ReplaceState
-            ProjectHistory::Get(project).PushState(
-               /*i18n-hint: undo history,
-                first and second parameters - realtime effect names
-                */
-               XO("Replaced %s with %s")
-                  .Format(oldName, effect->GetName()),
-               /*! i18n-hint: undo history record
-                first parameter - realtime effect name */
-               XO("Replace %s").Format(oldName));
-         }
+         // const auto effectID = mEffectPicker->PickEffect(mChangeButton, mEffectState->GetID());
+         // if(!effectID)
+         //    return;//nothing
+
+         // if(effectID->empty())
+         // {
+         //    RemoveFromList();
+         //    return;
+         // }
+
+         // auto &em = RealtimeEffectManager::Get(*mProject);
+         // auto oIndex = em.FindState(&*mTrack, mEffectState);
+         // if (!oIndex)
+         //    return;
+
+         // auto oldName = GetEffectName();
+         // auto &project = *mProject;
+         // auto trackName = mTrack->GetName();
+         // if (auto state = AudioIO::Get()
+         //    ->ReplaceState(project, &*mTrack, *oIndex, *effectID)
+         // ){
+         //    // Message subscription took care of updating the button text
+         //    // and destroyed `this`!
+         //    auto effect = state->GetEffect();
+         //    assert(effect); // postcondition of ReplaceState
+         //    ProjectHistory::Get(project).PushState(
+         //       /*i18n-hint: undo history,
+         //        first and second parameters - realtime effect names
+         //        */
+         //       XO("Replaced %s with %s")
+         //          .Format(oldName, effect->GetName()),
+         //       /*! i18n-hint: undo history record
+         //        first parameter - realtime effect name */
+         //       XO("Replace %s").Format(oldName));
+         // }
       }
 
       void OnPaint(wxPaintEvent&)
       {
+         std::cout << "OnPaint" << std::endl;
          wxBufferedPaintDC dc(this);
          const auto rect = wxRect(GetSize());
 
@@ -583,8 +602,8 @@ class VirtualStudioParticipantListWindow
    wxWeakRef<AudacityProject> mProject;
    std::shared_ptr<SampleTrack> mTrack;
    AButton* mAddEffect{nullptr};
-   wxStaticText* mAddEffectHint{nullptr};
-   wxWindow* mAddEffectTutorialLink{nullptr};
+   wxStaticText* mParticipantsHint{nullptr};
+   wxWindow* mStudioLink{nullptr};
    wxWindow* mParticipantListContainer{nullptr};
    StudioParticipantMap* mSubscriptionsMap{nullptr};
 
@@ -642,27 +661,29 @@ public:
       addEffect->Bind(wxEVT_BUTTON, &VirtualStudioParticipantListWindow::OnAddEffectClicked, this);
       mAddEffect = addEffect;
 
-      auto addEffectHint = safenew ThemedWindowWrapper<wxStaticText>(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxST_NO_AUTORESIZE);
+      auto participantsHint = safenew ThemedWindowWrapper<wxStaticText>(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxST_NO_AUTORESIZE);
       //Workaround: text is set in the OnSizeChange
-      addEffectHint->SetForegroundColorIndex(clrTrackPanelText);
-      mAddEffectHint = addEffectHint;
+      participantsHint->SetForegroundColorIndex(clrTrackPanelText);
+      mParticipantsHint = participantsHint;
 
-      auto addEffectTutorialLink = safenew ThemedWindowWrapper<wxHyperlinkCtrl>(
-         this, wxID_ANY, _("Watch video"),
-         "https://www.audacityteam.org/realtime-video", wxDefaultPosition,
+      //std::string url = kApiBaseUrl + "/studios";
+      //wxString wxUrl(url);
+      auto studioLink = safenew ThemedWindowWrapper<wxHyperlinkCtrl>(
+         this, wxID_ANY, _("Manage studio"),
+         kApiBaseUrl + "/studios", wxDefaultPosition,
          wxDefaultSize, wxHL_ALIGN_LEFT | wxHL_CONTEXTMENU);
 
       //i18n-hint: Hyperlink to the effects stack panel tutorial video
-      addEffectTutorialLink->SetTranslatableLabel(XO("Watch video"));
+      studioLink->SetTranslatableLabel(XO("Manage studio"));
 #if wxUSE_ACCESSIBILITY
-      safenew WindowAccessible(addEffectTutorialLink);
+      safenew WindowAccessible(studioLink);
 #endif
 
-      addEffectTutorialLink->Bind(
+      studioLink->Bind(
          wxEVT_HYPERLINK, [](wxHyperlinkEvent& event)
          { BasicUI::OpenInDefaultBrowser(event.GetURL()); });
 
-      mAddEffectTutorialLink = addEffectTutorialLink;
+      mStudioLink = studioLink;
 
       //indicates the insertion position of the item
       auto dropHintLine = safenew ThemedWindowWrapper<DropHintLine>(participantListContainer, wxID_ANY);
@@ -672,8 +693,8 @@ public:
       rootSizer->Add(participantsTitle, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 4);
       rootSizer->Add(participantListContainer, 0, wxEXPAND | wxBOTTOM, 0);
       rootSizer->Add(addEffect, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 20);
-      rootSizer->Add(addEffectHint, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 20);
-      rootSizer->Add(addEffectTutorialLink, 0, wxLEFT | wxRIGHT | wxEXPAND, 20);
+      rootSizer->Add(participantsHint, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 20);
+      rootSizer->Add(studioLink, 0, wxLEFT | wxRIGHT | wxEXPAND, 20);
 
       SetSizer(rootSizer.release());
       SetMinSize({});
@@ -838,16 +859,16 @@ public:
 
    void OnSizeChanged(wxSizeEvent& event)
    {
-      if(auto sizerItem = GetSizer()->GetItem(mAddEffectHint))
+      if(auto sizerItem = GetSizer()->GetItem(mParticipantsHint))
       {
          //We need to wrap the text whenever panel width changes and adjust widget height
          //so that text is fully visible, but there is no height-for-width layout algorithm
          //in wxWidgets yet, so for now we just do it manually
 
          //Restore original text, because 'Wrap' will replace it with wrapped one
-         mAddEffectHint->SetLabel(_("Realtime effects are non-destructive and can be changed at any time."));
-         mAddEffectHint->Wrap(GetClientSize().x - sizerItem->GetBorder() * 2);
-         mAddEffectHint->InvalidateBestSize();
+         mParticipantsHint->SetLabel(_("Join this studio to manage participants."));
+         mParticipantsHint->Wrap(GetClientSize().x - sizerItem->GetBorder() * 2);
+         mParticipantsHint->InvalidateBestSize();
       }
       event.Skip();
    }
@@ -855,11 +876,12 @@ public:
    void OnEffectListItemChange(const RealtimeEffectListMessage& msg)
    {
       auto sizer = mParticipantListContainer->GetSizer();
+      /*
       const auto insertItem = [this, &msg](){
          auto& effects = RealtimeEffectList::Get(*mTrack);
-         InsertEffectRow(msg.srcIndex, effects.GetStateAt(msg.srcIndex));
-         mAddEffectHint->Hide();
-         mAddEffectTutorialLink->Hide();
+         InsertParticipantRow(msg.srcIndex, effects.GetStateAt(msg.srcIndex));
+         mParticipantsHint->Hide();
+         mStudioLink->Hide();
       };
       const auto removeItem = [&](){
          auto& ui = RealtimeEffectStateUI::Get(*msg.affectedState);
@@ -879,8 +901,8 @@ public:
                mAddEffect->SetFocus();
 
             mParticipantListContainer->Hide();
-            mAddEffectHint->Show();
-            mAddEffectTutorialLink->Show();
+            mParticipantsHint->Show();
+            mStudioLink->Show();
          }
       };
 
@@ -920,16 +942,20 @@ public:
       {
          removeItem();
       }
+      */
       SendSizeEventToParent();
    }
 
-   void ResetTrack()
+   void Reset()
    {
+      mParticipantChangeSubscription.Reset();
+      /*
       mEffectListItemMovedSubscription.Reset();
 
       mTrack.reset();
       mProject = nullptr;
       ReloadEffectsList();
+      */
    }
 
    void SetTrack(AudacityProject& project,
@@ -969,10 +995,25 @@ public:
       mParticipantListContainer->Hide();
       mParticipantListContainer->GetSizer()->Clear(true);
 
-
-      if(!mTrack || RealtimeEffectList::Get(*mTrack).GetStatesCount() == 0)
+      auto isEmpty = mSubscriptionsMap->GetParticipantsCount() == 0;
+      if (isEmpty) {
          mParticipantListContainer->Hide();
+         return;
+      }
 
+      wxArrayString userIDs;
+      for (auto& participant : mSubscriptionsMap->GetMap()) {
+         userIDs.push_back(participant.first);
+      }
+
+      wxSortedArrayString sortedUserIDs(userIDs);
+      for(size_t i = 0, count = sortedUserIDs.GetCount(); i < count; ++i) {
+         auto& participant = *mSubscriptionsMap->GetParticipantByID(std::string(sortedUserIDs[i].mb_str()));
+         participant.SetIndex(i);
+         //InsertEffectRow(i, effects.GetStateAt(i));
+      }
+
+      /*
       auto isEmpty{true};
       if(mTrack)
       {
@@ -981,12 +1022,13 @@ public:
          for(size_t i = 0, count = effects.GetStatesCount(); i < count; ++i)
             InsertEffectRow(i, effects.GetStateAt(i));
       }
-      mAddEffect->SetEnabled(!!mTrack);
+      */
+      mAddEffect->SetEnabled(true);
       //Workaround for GTK: Underlying GTK widget does not update
       //its size when wxWindow size is set to zero
       mParticipantListContainer->Show(!isEmpty);
-      mAddEffectHint->Show(isEmpty);
-      mAddEffectTutorialLink->Show(isEmpty);
+      mParticipantsHint->Show(isEmpty);
+      mStudioLink->Show(isEmpty);
 
       SendSizeEventToParent();
    }
@@ -994,46 +1036,44 @@ public:
    void OnAddEffectClicked(const wxCommandEvent& event)
    {
       mSubscriptionsMap->Print();
+      // if(!mTrack || mProject == nullptr)
+      //    return;
 
-      if(!mTrack || mProject == nullptr)
-         return;
+      // const auto effectID = PickEffect(dynamic_cast<wxWindow*>(event.GetEventObject()), {});
 
-      const auto effectID = PickEffect(dynamic_cast<wxWindow*>(event.GetEventObject()), {});
+      // if(!effectID || effectID->empty())
+      //    return;
 
-      if(!effectID || effectID->empty())
-         return;
+      // auto plug = PluginManager::Get().GetPlugin(*effectID);
+      // if(!plug)
+      //    return;
 
-      auto plug = PluginManager::Get().GetPlugin(*effectID);
-      if(!plug)
-         return;
+      // if(!PluginManager::IsPluginAvailable(*plug)) {
+      //    BasicUI::ShowMessageBox(
+      //       XO("This plugin could not be loaded.\nIt may have been deleted."),
+      //       BasicUI::MessageBoxOptions()
+      //          .Caption(XO("Plugin Error")));
 
-      if(!PluginManager::IsPluginAvailable(*plug)) {
-         BasicUI::ShowMessageBox(
-            XO("This plugin could not be loaded.\nIt may have been deleted."),
-            BasicUI::MessageBoxOptions()
-               .Caption(XO("Plugin Error")));
+      //    return;
+      // }
 
-         return;
-      }
-
-      if(auto state = AudioIO::Get()->AddState(*mProject, &*mTrack, *effectID))
-      {
-         auto effect = state->GetEffect();
-         assert(effect); // postcondition of AddState
-         const auto effectName = effect->GetName();
-         ProjectHistory::Get(*mProject).PushState(
-            /*! i18n-hint: undo history record
-             first parameter - realtime effect name
-             second parameter - track name
-             */
-            XO("Added %s to %s").Format(effectName, mTrack->GetName()),
-            //i18n-hint: undo history record
-            XO("Add %s").Format(effectName));
-      }
+      // if(auto state = AudioIO::Get()->AddState(*mProject, &*mTrack, *effectID))
+      // {
+      //    auto effect = state->GetEffect();
+      //    assert(effect); // postcondition of AddState
+      //    const auto effectName = effect->GetName();
+      //    ProjectHistory::Get(*mProject).PushState(
+      //       /*! i18n-hint: undo history record
+      //        first parameter - realtime effect name
+      //        second parameter - track name
+      //        */
+      //       XO("Added %s to %s").Format(effectName, mTrack->GetName()),
+      //       //i18n-hint: undo history record
+      //       XO("Add %s").Format(effectName));
+      // }
    }
 
-   void InsertEffectRow(size_t index,
-      const std::shared_ptr<RealtimeEffectState> &pState)
+   void InsertParticipantRow(size_t index, const std::shared_ptr<StudioParticipant> p)
    {
       if(mProject == nullptr)
          return;
@@ -1042,9 +1082,9 @@ public:
       if(!mParticipantListContainer->IsShown())
          mParticipantListContainer->Show();
 
-      auto row = safenew ThemedWindowWrapper<RealtimeEffectControl>(mParticipantListContainer, this, wxID_ANY);
+      auto row = safenew ThemedWindowWrapper<ParticipantControl>(mParticipantListContainer, this, wxID_ANY);
       row->SetBackgroundColorIndex(clrEffectListItemBackground);
-      row->SetEffect(*mProject, mTrack, pState);
+      row->SetParticipant(*mProject, p);
       mParticipantListContainer->GetSizer()->Insert(index, row, 0, wxEXPAND);
    }
 };
@@ -1124,6 +1164,14 @@ void StudioParticipant::UpdateVolume(float volume)
    mVolume = volume;
 }
 
+void StudioParticipant::SetIndex(int idx)
+{
+   if (mIndex == idx) {
+      return;
+   }
+   mIndex = idx;
+}
+
 StudioParticipantMap::StudioParticipantMap(wxWindow* parent)
 {
    mParent = parent;
@@ -1131,6 +1179,11 @@ StudioParticipantMap::StudioParticipantMap(wxWindow* parent)
 
 StudioParticipantMap::~StudioParticipantMap()
 {
+}
+
+std::map<std::string, StudioParticipant*> StudioParticipantMap::GetMap()
+{
+   return mMap;
 }
 
 StudioParticipant* StudioParticipantMap::GetParticipantByID(std::string id)
@@ -1152,7 +1205,7 @@ void StudioParticipantMap::UpdateParticipantVolume(std::string id, float volume)
    }
 }
 
-int StudioParticipantMap::GetParticipantsCount()
+unsigned long StudioParticipantMap::GetParticipantsCount()
 {
    return mMap.size();
 }
@@ -1194,6 +1247,8 @@ VirtualStudioPanel::VirtualStudioPanel(
       , mProject(project)
       , mPrefsListenerHelper(std::make_unique<PrefsListenerHelper>(project))
 {
+   mDeviceToOwnerMap.clear();
+   mOwnerToDeviceMap.clear();
    mSubscriptionsMap = safenew StudioParticipantMap(this);
 
    auto vSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
@@ -1208,6 +1263,7 @@ VirtualStudioPanel::VirtualStudioPanel(
       auto enabled = safenew ThemedAButtonWrapper<AButton>(header);
       enabled->SetImageIndices(0, bmpEffectOff, bmpEffectOff, bmpEffectOn, bmpEffectOn, bmpEffectOff);
       enabled->SetButtonToggles(true);
+      enabled->Disable();
       enabled->SetTranslatableLabel(XO("Online"));
       enabled->SetBackgroundColorIndex(clrMedium);
       mStudioOnline = enabled;
@@ -1415,6 +1471,11 @@ void VirtualStudioPanel::UpdateServerStatus(std::string status)
    }
    mServerStatus = status;
    mStudioStatus->SetLabel(status);
+   if (status == "Ready") {
+      InitMetersWebsocket();
+   } else {
+      StopMetersWebsocket();
+   }
    std::cout << mServerStatus << std::endl;
 }
 
@@ -1433,6 +1494,11 @@ void VirtualStudioPanel::UpdateServerSessionID(std::string sessionID)
       return;
    }
    mServerSessionID = sessionID;
+   if (!sessionID.empty()) {
+      InitMetersWebsocket();
+   } else {
+      StopMetersWebsocket();
+   }
 }
 
 void VirtualStudioPanel::UpdateServerOwnerID(std::string ownerID)
@@ -1445,7 +1511,6 @@ void VirtualStudioPanel::UpdateServerOwnerID(std::string ownerID)
       FetchOwner(ownerID);
    }
 }
-
 
 void VirtualStudioPanel::UpdateServerEnabled(bool enabled) {
    if (mServerEnabled == enabled) {
@@ -1545,6 +1610,43 @@ void VirtualStudioPanel::OnSubscriptionWssMessage(ConnectionHdl hdl, websocketpp
    mSubscriptionsMap->AddParticipant(userID, name, picture, 0.0);
 }
 
+void VirtualStudioPanel::OnDeviceWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg)
+{
+   using namespace rapidjson;
+
+   auto payload = msg->get_payload();
+
+   Document document;
+   document.Parse(payload.c_str());
+   // Check for parse errors
+   if (document.HasParseError()) {
+      wxLogInfo("Error parsing JSON: %s", document.GetParseError());
+      return;
+   }
+
+   auto deviceID = std::string(document["id"].GetString());
+   auto ownerID = std::string(document["ownerId"].GetString());
+   mDeviceToOwnerMap[deviceID] = ownerID;
+   mOwnerToDeviceMap[ownerID] = deviceID;
+}
+
+void VirtualStudioPanel::OnMeterWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg)
+{
+   using namespace rapidjson;
+
+   auto payload = msg->get_payload();
+
+   Document document;
+   document.Parse(payload.c_str());
+   // Check for parse errors
+   if (document.HasParseError()) {
+      wxLogInfo("Error parsing JSON: %s", document.GetParseError());
+      return;
+   }
+
+   std::cout << "Meter: " << payload << std::endl;
+}
+
 void VirtualStudioPanel::OnWssOpen(ConnectionHdl hdl)
 {
    std::cout << "yaaaayyy" << std::endl;
@@ -1581,10 +1683,14 @@ void VirtualStudioPanel::InitializeWebsockets()
 {
    InitServerWebsocket();
    InitSubscriptionsWebsocket();
+   InitDevicesWebsocket();
 }
 
 void VirtualStudioPanel::StopWebsockets()
 {
+   StopMetersWebsocket();
+   mDevicesThread.interrupt();
+   mDevicesThread.join();
    mSubscriptionsThread.interrupt();
    mSubscriptionsThread.join();
    mServerThread.interrupt();
@@ -1660,22 +1766,77 @@ void VirtualStudioPanel::InitSubscriptionsWebsocket()
    });
 
    mSubscriptionsThread.detach();
+}
 
-   /* This is the way the docs suggest doing this but it didn't work for me...
-   WSSClient client;
-   turn_off_logging(client);
-   client.init_asio();
-   client.start_perpetual();
+void VirtualStudioPanel::InitDevicesWebsocket()
+{
+   mDevicesThread = boost::thread([&]
+   {
+      WSSClient client;
+      DisableLogging(client);
+      client.init_asio();
+      client.set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
+      client.set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
+      client.set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnDeviceWssMessage, this, ::_1, ::_2));
+      std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "/devices?auth_code=" + mAccessToken;
+      //std::cout << "URL is: " << url << std::endl;
+      SetUrl(client, url);
 
-   set_tls_init_handler(client);
-   set_open_handler(client);
-   set_message_handler(client);
-   std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "?auth_code=" + mAccessToken;
-   std::cout << "URL is: " << url << std::endl;
-   set_url(client, url);
-   mThread.reset(new websocketpp::lib::thread(&WSSClient::run, &client));
-   mThread->detach();
-   */
+      try {
+         client.run();
+      } catch (websocketpp::exception const & e) {
+         std::cout << e.what() << std::endl;
+      } catch (std::exception const & e) {
+         std::cout << e.what() << std::endl;
+      } catch (...) {
+         std::cout << "other exception" << std::endl;
+      }
+   });
+
+   mDevicesThread.detach();
+}
+
+void VirtualStudioPanel::InitMetersWebsocket()
+{
+   std::cout << "InitMetersWebsocket" << std::endl;
+   if (mServerStatus != "Ready" || mServerSessionID.empty()) {
+      return;
+   }
+   std::cout << "InitMetersWebsocket done" << std::endl;
+
+   mMetersThread = boost::thread([&]
+   {
+      WSSClient client;
+      DisableLogging(client);
+      client.init_asio();
+      client.set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
+      client.set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
+      client.set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnMeterWssMessage, this, ::_1, ::_2));
+
+      std::string secret = sha256("jktp-" + mServerID + "-" + mServerSessionID);
+      std::cout << "SHA: " << secret << std::endl;
+      std::string url = "wss://" + mServerSessionID + ".jacktrip.cloud/meters?auth_code=" + secret;
+      std::cout << "URL is: " << url << std::endl;
+      SetUrl(client, url);
+
+      try {
+         client.run();
+      } catch (websocketpp::exception const & e) {
+         std::cout << e.what() << std::endl;
+      } catch (std::exception const & e) {
+         std::cout << e.what() << std::endl;
+      } catch (...) {
+         std::cout << "other exception" << std::endl;
+      }
+   });
+
+   mMetersThread.detach();
+}
+
+void VirtualStudioPanel::StopMetersWebsocket()
+{
+   mMetersThread.interrupt();
+   mMetersThread.join();
 }
 
 void VirtualStudioPanel::FetchOwner(std::string ownerID)
@@ -1717,6 +1878,8 @@ void VirtualStudioPanel::FetchOwner(std::string ownerID)
 
 void VirtualStudioPanel::DoClose()
 {
+   mDeviceToOwnerMap.clear();
+   mOwnerToDeviceMap.clear();
    std::cout << "Stopping websocket in DoClose" << std::endl;
    StopWebsockets();
    std::cout << "Stopped websocket in DoClose" << std::endl;
@@ -1757,7 +1920,7 @@ void VirtualStudioPanel::ResetStudio()
    UpdateServerEnabled(false);
    UpdateServerOwnerID("");
 
-   mParticipantsList->ResetTrack();
+   mParticipantsList->Reset();
    mCurrentTrack.reset();
 }
 

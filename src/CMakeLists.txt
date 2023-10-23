@@ -177,6 +177,8 @@ list( APPEND SOURCES
       RealtimeEffectPanel.h
       VirtualStudioPanel.cpp
       VirtualStudioPanel.h
+      sha256.cpp
+      sha256.h
       Screenshot.cpp
       Screenshot.h
       ScrubState.cpp
