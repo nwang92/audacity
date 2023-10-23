@@ -7,6 +7,7 @@
 #include "../ProjectWindow.h"
 #include "../ProjectWindows.h"
 #include "../RealtimeEffectPanel.h"
+#include "../VirtualStudioPanel.h"
 #include "Track.h"
 #include "SelectionState.h"
 #include "../TrackPanel.h"
@@ -30,13 +31,14 @@ void NextOrPrevFrame(AudacityProject &project, bool forward)
    auto temp1 = AButton::TemporarilyAllowFocus();
    auto temp2 = ASlider::TemporarilyAllowFocus();
    auto temp3 = MeterPanel::TemporarilyAllowFocus();
-   
+
    std::vector<wxWindow*> seq;
    // Skip docks that are empty (Bug 1564).
    if(!ToolManager::Get(project).GetTopDock()->GetChildren().IsEmpty())
       seq.push_back(ProjectWindow::Get( project ).GetTopPanel());
    seq.push_back(&TrackPanel::Get( project ));
    seq.push_back(&RealtimeEffectPanel::Get(project));
+   seq.push_back(&VirtualStudioPanel::Get(project));
    if(!ToolManager::Get( project ).GetBotDock()->GetChildren().IsEmpty())
       seq.push_back(ToolManager::Get( project ).GetBotDock());
 

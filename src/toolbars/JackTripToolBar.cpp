@@ -788,6 +788,9 @@ void JackTripToolBar::OnAudioSetup(wxCommandEvent& WXUNUSED(evt))
 
       menu.Append(kTestButton, _("&Test Record"));
       menu.Bind(wxEVT_MENU, &JackTripToolBar::OnRecord, this, kTestButton);
+
+      menu.Append(kPanelButton, _("&Open Panel"));
+      menu.Bind(wxEVT_MENU, &JackTripToolBar::OnPanel, this, kPanelButton);
    } else {
       for (auto it = mServerIdToRecordings.begin(); it != mServerIdToRecordings.end(); it++) {
          auto serverID = it->first;
@@ -800,6 +803,7 @@ void JackTripToolBar::OnAudioSetup(wxCommandEvent& WXUNUSED(evt))
          }
       }
       menu.AppendSubMenu(recordingsSubMenu, _("Import Recordings..."));
+      menu.AppendSeparator();
       mServers.AppendSubMenu(*this, menu, &JackTripToolBar::OnStudio, _("&Join Studio..."));
    }
 
@@ -1148,6 +1152,14 @@ void JackTripToolBar::OnStudio(std::string serverID, int id)
 
 void JackTripToolBar::ToggleStudioPanel(std::string serverID)
 {
+   auto &panel = VirtualStudioPanel::Get( mProject );
+   if (panel.IsShown()) {
+      panel.HidePanel();
+   } else {
+      std::cout << "ShowPanel" << std::endl;
+      panel.ShowPanel(serverID, mAccessToken, true);
+   }
+   /*
    auto &pw = ProjectWindow::Get( mProject );
    auto containerWindow = pw.GetContainerWindow();
    auto trackWindow = pw.GetTrackListWindow();
@@ -1165,14 +1177,22 @@ void JackTripToolBar::ToggleStudioPanel(std::string serverID)
          wxID_ANY,
          wxDefaultPosition,
          wxDefaultSize,
-         0
+         wxSP_3DSASH | wxSP_BORDER
       );
       mSidePanel->SetSizer( safenew wxBoxSizer(wxVERTICAL) );
       mSidePanel->SetLabel("Side Panel");
       mSidePanel->SetLayoutDirection(wxLayout_LeftToRight);
       mSidePanel->SetBackgroundColour(*wxRED);
       containerWindow->SplitVertically(mSidePanel, trackWindow, 300);
+      containerWindow->Bind(wxEVT_SPLITTER_DOUBLECLICKED, [](wxSplitterEvent& event){
+         //"The default behaviour is to unsplit the window"
+         event.Veto();//do noting instead
+      });
+      containerWindow->Bind(wxEVT_SPLITTER_SASH_POS_CHANGING, [=](wxSplitterEvent& event){
+         event.SetSashPosition(300);
+      });
    }
+   */
 }
 
 void JackTripToolBar::OnRecording(std::string serverID, int id)
@@ -1253,6 +1273,18 @@ void JackTripToolBar::OnRecord(wxCommandEvent& event)
    ProjectAudioManager::Get( *mCurrProject ).OnVirtualStudioRecord( false );
    mIsRecording = true;
    */
+}
+
+void JackTripToolBar::OnPanel(wxCommandEvent& event)
+{
+   std::cout << "OnPanel called" << std::endl;
+   auto &panel = VirtualStudioPanel::Get( mProject );
+   if (panel.IsShown()) {
+      panel.HidePanel();
+   } else {
+      std::cout << "ShowPanel" << std::endl;
+      panel.ShowPanel("e0a1369c-3f4f-4d46-821d-69ea7139095c", "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6Ik56X1ZmZzNRWl90QUxyNE9KVU5JNSJ9.eyJpc3MiOiJodHRwczovL2F1dGguamFja3RyaXAub3JnLyIsInN1YiI6Imdvb2dsZS1vYXV0aDJ8MTA5MTQ1NzExNTMwODMwMTkwNDYzIiwiYXVkIjpbImh0dHBzOi8vYXBpLmphY2t0cmlwLm9yZyIsImh0dHBzOi8vamFja3RyaXAudXMuYXV0aDAuY29tL3VzZXJpbmZvIl0sImlhdCI6MTY5NzkyMjk5OSwiZXhwIjoxNjk4MDA5Mzk5LCJhenAiOiJZUlFuQ2g1aWgzMldRY2l1bTVHbGRsS0VEYzVXSnZwNiIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwifQ.hvk9OzzATmkVcBei_9NEwQ3rbVqroluIH-CbpuRk0ckNaDIBiNKtV5knhDwksIEqCzWgMGAfJ7MDR7tzYKBnS3Q5NYbgFfMPPwTMHFgWhgheH2pskr1zHk-qTBySlrprkL677eSicFkImJfyf3P9kZ7jORkQsNU3GHy1khYeGx-kZV5elX3z6dxa3qUaJEzE-BF4UCEqR4uToQ-exPrEbWUWRUOuC7nBfb-cHCJRRifDn7StFETiSfb5hJuC9qtpjuXzFQHBYKq6Bj0udU7sfZJIvH-Z6A9gioitMF_lgN2N-pEwAneJaHM_a4tqeTvMXCsviLIgxDuRU86bETAH5g", false);
+   }
 }
 
 void JackTripToolBar::OnAuth(wxCommandEvent& event)
@@ -1888,10 +1920,10 @@ VirtualStudioServerPanel::VirtualStudioServerPanel(JackTripToolBar* toolbar,
 
 VirtualStudioServerPanel::~VirtualStudioServerPanel()
 {
-   std::cout << "Stopping websocket" << std::endl;
+   std::cout << "Stopping websocket in destructor" << std::endl;
    mServerThread.interrupt();
    mServerThread.join();
-   std::cout << "Stopped websocket" << std::endl;
+   std::cout << "Stopped websocket in destructor" << std::endl;
 
    mServerID = "";
    mAccessToken = "";
@@ -1948,13 +1980,37 @@ void VirtualStudioServerPanel::DoLayout()
 {
    ShuttleGui s(this, eIsCreating);
 
-   s.StartVerticalLay();
+   s.StartVerticalLay(wxEXPAND);
    {
+      s.SetBorder(4);
+      s.StartHorizontalLay(wxALIGN_RIGHT, 0);
+      {
+         s.AddSpace(0, 0, 1);
+         mClose = s.Id(CloseStudioButtonID).AddButton(XXO("&Disconnect"));
+         s.AddSpace(0, 0, 1);
+      }
+      s.EndHorizontalLay();
+
+      s.AddSpace(0, 4, 0);
+      s.AddTitle(XO("Name: " + mServerName));
+      s.AddTitle(XO("Status: " + mServerStatus));
+      s.AddSpace(0, 4, 0);
+
+      s.StartHorizontalLay(wxEXPAND, 0);
+      {
+         s.AddSpace(0, 0, 1);
+         if (mServerStatus == "Ready") {
+            mJoin = s.Id(JoinButtonID).AddButton(XXO("&Launch JackTrip App"));
+         } else {
+            mJoin = s.Id(JoinButtonID).AddButton(XXO("&Start Studio"));
+         }
+         s.AddSpace(0, 0, 1);
+      }
+      s.EndHorizontalLay();
+
       s.StartInvisiblePanel(16);
       {
-         s.SetBorder(0);
-         s.AddSpace(0, 16, 0);
-         s.AddTitle(XO("JackTrip Virtual Studio"));
+         s.SetBorder(2);
 
          if (!mServerBannerUrl.empty()) {
             s.AddSpace(0, 16, 0);
@@ -1965,26 +2021,6 @@ void VirtualStudioServerPanel::DoLayout()
             // wxBitmap bitmap(img);
             // s.AddIcon(&bitmap);
          }
-
-         s.AddSpace(0, 16, 0);
-         s.AddTitle(XO("Name: " + mServerName));
-         s.AddTitle(XO("Status: " + mServerStatus));
-
-         s.AddSpace(0, 16, 0);
-
-         s.AddWindow(safenew wxStaticLine { s.GetParent() }, wxEXPAND);
-
-         s.StartHorizontalLay(wxEXPAND, 0);
-         {
-            s.AddSpace(0, 0, 1);
-
-            mClose = s.Id(CloseStudioButtonID).AddButton(XXO("&Close"));
-            s.AddSpace(4, 0, 0);
-            mJoin = s.Id(JoinButtonID).AddButton(XXO("&Launch JackTrip App"));
-
-            s.AddSpace(0, 0, 1);
-         }
-         s.EndHorizontalLay();
 
          if (!mServerSessionID.empty() || mServerSessionID.empty()) {
             s.AddSpace(0, 24, 0);
@@ -2010,7 +2046,7 @@ void VirtualStudioServerPanel::DoLayout()
    s.EndVerticalLay();
 
    Layout();
-   Fit();
+   //Fit();
    //Centre();
 }
 
@@ -2199,10 +2235,10 @@ void VirtualStudioServerPanel::OnStop(wxCommandEvent &event)
 
 void VirtualStudioServerPanel::OnClose(wxCommandEvent &event)
 {
-   std::cout << "Stopping websocket" << std::endl;
+   std::cout << "Stopping websocket in OnClose" << std::endl;
    mServerThread.interrupt();
    mServerThread.join();
-   std::cout << "Stopped websocket" << std::endl;
+   std::cout << "Stopped websocket in OnClose" << std::endl;
    mToolbar->ToggleStudioPanel(mServerID);
    //Close();
 }

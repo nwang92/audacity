@@ -44,6 +44,7 @@
 //#include "../widgets/MeterPanel.h"
 #include "AudacityMessageBox.h"
 #include "ProjectWindow.h"
+#include "VirtualStudioPanel.h"
 #include "../widgets/FileHistory.h"
 #include <websocketpp/client.hpp>
 #include <websocketpp/config/asio_client.hpp>
@@ -54,8 +55,6 @@ using SslContext = websocketpp::lib::asio::ssl::context;
 using websocketpp::lib::placeholders::_1;
 using websocketpp::lib::placeholders::_2;
 
-const std::string kApiHost = "app.jacktrip.org";
-const std::string kApiBaseUrl = "https://" + kApiHost;
 const std::string kAuthAuthorizeUrl = "https://auth.jacktrip.org/authorize";
 const std::string kAuthTokenUrl = "https://auth.jacktrip.org/oauth/token";
 const std::string kAuthAudience = "https://api.jacktrip.org";
@@ -78,6 +77,7 @@ class JackTripToolBar final : public ToolBar {
    static constexpr int kAudioSettings = 15800;
    static constexpr int kAuthButton = 15801;
    static constexpr int kTestButton = 15802;
+   static constexpr int kPanelButton = 15803;
 
  public:
    static Identifier ID();
@@ -107,6 +107,7 @@ class JackTripToolBar final : public ToolBar {
    void OnStudio(std::string serverID, int id);
    void OnRecording(std::string serverID, int id);
    void OnRecord(wxCommandEvent& event);
+   void OnPanel(wxCommandEvent& event);
    void OnAuth(wxCommandEvent& event);
    std::string ExecCommand(const char* cmd);
    bool JackTripExists();

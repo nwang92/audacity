@@ -175,6 +175,8 @@ list( APPEND SOURCES
       ProjectWindows.h
       RealtimeEffectPanel.cpp
       RealtimeEffectPanel.h
+      VirtualStudioPanel.cpp
+      VirtualStudioPanel.h
       Screenshot.cpp
       Screenshot.h
       ScrubState.cpp
