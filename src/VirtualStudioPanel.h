@@ -56,6 +56,18 @@ class AudacityProject;
 struct ParticipantEvent
 {
    enum Type {
+      // Posted when volume is changed
+      VOLUME_CHANGE,
+
+      // Posted when participant is hidden
+      HIDDEN,
+
+      // Posted when participant is shown
+      SHOWN,
+
+      // Posted when a new participant is added
+      ADDITION,
+
       //! Posted when the set of selected tracks changes.
       SELECTION_CHANGE,
 
@@ -69,14 +81,8 @@ struct ParticipantEvent
       /*! mpTrack points to the moved track that is earliest in the New ordering. */
       PERMUTED,
 
-      // Posted when volume is changed
-      VOLUME_CHANGE,
-
       //! Posted when some track changed its height.
       RESIZING,
-
-      //! Posted when a track has been added to a tracklist.  Also posted when one track replaces another
-      ADDITION,
 
       //! Posted when a track has been deleted from a tracklist. Also posted when one track replaces another
       /*! mpTrack points to the removed track. It is expected, that track is valid during the event.
@@ -85,31 +91,34 @@ struct ParticipantEvent
       DELETION,
    };
 
-   ParticipantEvent( Type type, int extra = -1)
+   ParticipantEvent( Type type, std::string uid = "")
       : mType{ type }
-      , mExtra{ extra }
+      , mUid{ uid }
    {}
 
    ParticipantEvent( const ParticipantEvent& ) = default;
 
    const Type mType;
    //const std::weak_ptr<StudioParticipant> mParticipant;
-   const int mExtra;
+   const std::string mUid;
 };
 
 class StudioParticipant final
    : public Observer::Publisher<ParticipantEvent>
 {
 public:
-   StudioParticipant(wxWindow* parent, std::string id, std::string name, std::string picture, float volume);
+   StudioParticipant(wxWindow* parent, std::string id, std::string name, std::string picture);
    ~StudioParticipant();
 
    std::string GetID();
    std::string GetName();
    std::string GetPicture();
-   float GetVolume();
-   void UpdateVolume(float volume);
+   bool IsHidden();
+   float GetLeftVolume();
+   float GetRightVolume();
+   void UpdateVolume(float left, float right);
    void SetIndex(int idx);
+   void SetShown(bool shown);
    void QueueEvent(ParticipantEvent event);
 
 private:
@@ -119,8 +128,10 @@ private:
    std::string mPicture;
    wxBitmap mBitmap;
    wxImage mImage;
+   bool mShown;
    int mIndex;
-   float mVolume;
+   float mLeftVolume;
+   float mRightVolume;
 };
 
 class StudioParticipantMap final
@@ -132,8 +143,8 @@ public:
 
    std::map<std::string, std::shared_ptr<StudioParticipant>> GetMap();
    std::shared_ptr<StudioParticipant> GetParticipantByID(std::string id);
-   void AddParticipant(std::string id, std::string name, std::string picture, float volume);
-   void UpdateParticipantVolume(std::string id, float volume);
+   void AddParticipant(std::string id, std::string name, std::string picture);
+   void UpdateParticipantVolume(std::string id, float left, float right);
    unsigned long GetParticipantsCount();
    void QueueEvent(ParticipantEvent event);
    void Print();
@@ -172,17 +183,24 @@ class VirtualStudioPanel : public wxPanel
    std::string mServerSessionID;
    std::string mServerOwnerID;
    std::string mServerStatus;
+   int mServerBroadcast;
    double mServerSampleRate;
    bool mServerEnabled;
 
+   WSSClient* mServerClient;
    boost::thread mServerThread;
+
+   WSSClient* mSubscriptionsClient;
    boost::thread mSubscriptionsThread;
+
+   WSSClient* mDevicesClient;
    boost::thread mDevicesThread;
+
+   WSSClient* mMetersClient;
    boost::thread mMetersThread;
 
    StudioParticipantMap* mSubscriptionsMap{nullptr};
    std::map<std::string, std::string> mDeviceToOwnerMap;
-   std::map<std::string, std::string> mOwnerToDeviceMap;
    std::vector<std::shared_ptr<SampleTrack>> mPotentiallyRemovedTracks;
 
    // VirtualStudioPanel is wrapped using ThemedWindowWrapper,
@@ -230,6 +248,7 @@ private:
    void UpdateServerOwnerID(std::string ownerID);
    void UpdateServerEnabled(bool enabled);
    void UpdateServerSampleRate(double sampleRate);
+   void UpdateServerBroadcast(int broadcast);
 
    void OnServerWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg);
    void OnSubscriptionWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg);

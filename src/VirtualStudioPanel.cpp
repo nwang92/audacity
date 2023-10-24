@@ -450,24 +450,56 @@ namespace
          mSampleRate = sampleRate;
          mMeter->Reset(sampleRate, true);
 
-         mParticipantSubscription = mParticipant->Subscribe([this](ParticipantEvent evt) {
-            if (evt.mType == ParticipantEvent::VOLUME_CHANGE) {
+         mParticipantSubscription = mParticipant->Subscribe([this](const ParticipantEvent& evt) {
+            switch (evt.mType)
+            {
+            case ParticipantEvent::VOLUME_CHANGE:
                if (mMeter) {
-                  auto val = mParticipant->GetVolume();
                   float *numbers = new float[2];
-                  numbers[0] = val;
-                  numbers[1] = val;
+                  numbers[0] = mParticipant->GetLeftVolume();
+                  numbers[1] = mParticipant->GetRightVolume();
+                  std::cout << "hello " << numbers[0] << numbers[1] << std::endl;
                   mMeter->UpdateDisplay(2, 1, numbers);
                }
+               break;
+            /*
+            case ParticipantEvent::SHOWN:
+               if (mParticipant->GetID() == evt.mUid) {
+                  std::cout << "Show " << mParticipant->GetName() << std::endl;
+                  this->Show(true);
+                  Update();
+                  GetSizer()->Layout();
+               }
+               break;
+            case ParticipantEvent::HIDDEN:
+            if (mParticipant->GetID() == evt.mUid) {
+                  std::cout << "Hide " << mParticipant->GetName() << std::endl;
+                  this->Show(false);
+                  Update();
+                  GetSizer()->Layout();
+               }
+               break;
+            */
+            default:
+               break;
             }
          });
 
          std::string label;
-         if (participant != nullptr) {
+         if (mParticipant != nullptr) {
             label = GetEffectName();
             if (mParticipantName) {
                mParticipantName->SetLabel(label);
             }
+            /*
+            if (mParticipant->IsHidden()) {
+               std::cout << "Hiding " << mParticipant->GetName() << std::endl;
+               this->Show(false);
+            } else {
+               std::cout << "Showing " << mParticipant->GetName() << std::endl;
+               this->Show(true);
+            }
+            */
          }
       }
 
@@ -616,6 +648,7 @@ class VirtualStudioParticipantListWindow
 {
    wxWeakRef<AudacityProject> mProject;
    double mSampleRate;
+   std::string mServerID;
    std::shared_ptr<SampleTrack> mTrack;
    AButton* mAddEffect{nullptr};
    wxStaticText* mParticipantsHint{nullptr};
@@ -650,6 +683,27 @@ public:
             std::cout << "Participant list changed" << std::endl;
             ReloadEffectsList();
          });
+      /*
+      mParticipantChangeSubscription = mSubscriptionsMap->Subscribe([this](const ParticipantEvent& evt) {
+         switch (evt.mType)
+         {
+         case ParticipantEvent::ADDITION:
+            std::cout << "Participant list changed" << std::endl;
+            ReloadEffectsList();
+            break;
+         case ParticipantEvent::SHOWN:
+            std::cout << "LALALAA" << std::endl;
+            ReloadEffectsList();
+            break;
+         case ParticipantEvent::HIDDEN:
+            std::cout << "BOOOOYYY" << std::endl;
+            ReloadEffectsList();
+            break;
+         default:
+            break;
+         }
+      });
+      */
 
       auto rootSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
 
@@ -682,8 +736,6 @@ public:
       participantsHint->SetForegroundColorIndex(clrTrackPanelText);
       mParticipantsHint = participantsHint;
 
-      //std::string url = kApiBaseUrl + "/studios";
-      //wxString wxUrl(url);
       auto studioLink = safenew ThemedWindowWrapper<wxHyperlinkCtrl>(
          this, wxID_ANY, _("Manage studio"),
          kApiBaseUrl + "/studios", wxDefaultPosition,
@@ -880,7 +932,7 @@ public:
          //in wxWidgets yet, so for now we just do it manually
 
          //Restore original text, because 'Wrap' will replace it with wrapped one
-         mParticipantsHint->SetLabel(_("Join this studio to manage participants."));
+         mParticipantsHint->SetLabel(_("Manage participants in this studio once they join."));
          mParticipantsHint->Wrap(GetClientSize().x - sizerItem->GetBorder() * 2);
          mParticipantsHint->InvalidateBestSize();
       }
@@ -965,6 +1017,7 @@ public:
       mParticipantChangeSubscription.Reset();
       mProject = nullptr;
       mSampleRate = 0;
+      mServerID = "";
       ReloadEffectsList();
       /*
       mEffectListItemMovedSubscription.Reset();
@@ -975,12 +1028,18 @@ public:
       */
    }
 
-   void SetProject(AudacityProject& project, double sampleRate)
+   void SetProject(AudacityProject& project, std::string serverID, double sampleRate)
    {
       mEffectListItemMovedSubscription.Reset();
       mProject = &project;
       mSampleRate = sampleRate;
+      mServerID = serverID;
       ReloadEffectsList();
+
+      if (mStudioLink) {
+         auto link = dynamic_cast<wxHyperlinkCtrl*>(mStudioLink);
+         link->SetURL(kApiBaseUrl + "/studios/" + serverID);
+      }
       /*
       if (track)
       {
@@ -1023,6 +1082,11 @@ public:
             participant->SetIndex(i);
             InsertParticipantRow(i, participant);
             isEmpty = false;
+            /*
+            if (!participant->IsHidden()) {
+               isEmpty = false;
+            }
+            */
          }
       }
 
@@ -1082,7 +1146,7 @@ public:
 
    void InsertParticipantRow(size_t index, const std::shared_ptr<StudioParticipant> p)
    {
-      if (mProject == nullptr || mSampleRate == 0) {
+      if (mProject == nullptr || mSampleRate == 0 || mServerID.empty()) {
          return;
       }
 
@@ -1131,13 +1195,15 @@ AttachedWindows::RegisteredFactory sKey{
 };
 }
 
-StudioParticipant::StudioParticipant(wxWindow* parent, std::string id, std::string name, std::string picture, float volume)
+StudioParticipant::StudioParticipant(wxWindow* parent, std::string id, std::string name, std::string picture)
 {
    mParent = parent;
    mID = id;
    mName = name;
    mPicture = picture;
-   mVolume = volume;
+   mLeftVolume = 0;
+   mRightVolume = 0;
+   mShown = false;
 
    if (!picture.empty()) {
       if (!mImage.LoadFile(picture, wxBITMAP_TYPE_JPEG)) {
@@ -1172,18 +1238,29 @@ std::string StudioParticipant::GetPicture()
    return mPicture;
 }
 
-float StudioParticipant::GetVolume()
+bool StudioParticipant::IsHidden()
 {
-   return mVolume;
+   return !mShown;
 }
 
-void StudioParticipant::UpdateVolume(float volume)
+float StudioParticipant::GetLeftVolume()
 {
-   if (mVolume == volume) {
+   return mLeftVolume;
+}
+
+float StudioParticipant::GetRightVolume()
+{
+   return mRightVolume;
+}
+
+void StudioParticipant::UpdateVolume(float left, float right)
+{
+   if (mLeftVolume == left && mRightVolume == right) {
       return;
    }
-   mVolume = volume;
-   QueueEvent({ ParticipantEvent::VOLUME_CHANGE, 0 });
+   mLeftVolume = left;
+   mRightVolume = right;
+   QueueEvent({ ParticipantEvent::VOLUME_CHANGE, mID });
 }
 
 void StudioParticipant::SetIndex(int idx)
@@ -1192,6 +1269,19 @@ void StudioParticipant::SetIndex(int idx)
       return;
    }
    mIndex = idx;
+}
+
+void StudioParticipant::SetShown(bool shown)
+{
+   if (mShown == shown) {
+      return;
+   }
+   mShown = shown;
+   if (shown) {
+      QueueEvent({ ParticipantEvent::SHOWN, mID });
+   } else {
+      QueueEvent({ ParticipantEvent::HIDDEN, mID });
+   }
 }
 
 void StudioParticipant::QueueEvent(ParticipantEvent event)
@@ -1218,18 +1308,17 @@ std::shared_ptr<StudioParticipant> StudioParticipantMap::GetParticipantByID(std:
    return mMap[id];
 }
 
-void StudioParticipantMap::AddParticipant(std::string id, std::string name, std::string picture, float volume)
+void StudioParticipantMap::AddParticipant(std::string id, std::string name, std::string picture)
 {
-   auto p = std::make_shared<StudioParticipant>(mParent, id, name, picture, volume);
+   auto p = std::make_shared<StudioParticipant>(mParent, id, name, picture);
    mMap[id] = p;
-   QueueEvent({ ParticipantEvent::ADDITION, 0 });
+   QueueEvent({ ParticipantEvent::ADDITION, id });
 }
 
-void StudioParticipantMap::UpdateParticipantVolume(std::string id, float volume)
+void StudioParticipantMap::UpdateParticipantVolume(std::string id, float left, float right)
 {
    if (auto participant = mMap[id]) {
-      participant->UpdateVolume(volume);
-      QueueEvent({ ParticipantEvent::SELECTION_CHANGE, 0 });
+      participant->UpdateVolume(left, right);
    }
 }
 
@@ -1252,7 +1341,7 @@ void StudioParticipantMap::QueueEvent(ParticipantEvent event)
 void StudioParticipantMap::Print()
 {
    for (auto participant : mMap) {
-      std::cout << participant.first << " " << participant.second->GetName() << " " << participant.second->GetVolume() << std::endl;
+      std::cout << participant.first << " " << participant.second->GetName() << std::endl;
    };
 }
 
@@ -1276,7 +1365,6 @@ VirtualStudioPanel::VirtualStudioPanel(
       , mPrefsListenerHelper(std::make_unique<PrefsListenerHelper>(project))
 {
    mDeviceToOwnerMap.clear();
-   mOwnerToDeviceMap.clear();
    mSubscriptionsMap = safenew StudioParticipantMap(this);
 
    auto vSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
@@ -1560,6 +1648,13 @@ void VirtualStudioPanel::UpdateServerSampleRate(double sampleRate) {
    mServerSampleRate = sampleRate;
 }
 
+void VirtualStudioPanel::UpdateServerBroadcast(int broadcast) {
+   if (mServerBroadcast == broadcast) {
+      return;
+   }
+   mServerBroadcast = broadcast;
+}
+
 void VirtualStudioPanel::ShowPanel(std::string serverID, std::string accessToken, bool focus)
 {
    if(serverID.empty() || accessToken.empty())
@@ -1623,6 +1718,7 @@ void VirtualStudioPanel::OnServerWssMessage(ConnectionHdl hdl, websocketpp::conf
    UpdateServerSessionID(document["sessionId"].GetString());
    UpdateServerOwnerID(document["ownerId"].GetString());
    UpdateServerSampleRate(document["sampleRate"].GetDouble());
+   UpdateServerBroadcast(document["broadcast"].GetInt());
    UpdateServerEnabled(document["enabled"].GetBool());
 }
 
@@ -1643,7 +1739,7 @@ void VirtualStudioPanel::OnSubscriptionWssMessage(ConnectionHdl hdl, websocketpp
    auto userID = std::string(document["user_id"].GetString());
    auto name = std::string(document["nickname"].GetString());
    auto picture = std::string(document["picture"].GetString());
-   mSubscriptionsMap->AddParticipant(userID, name, picture, 0.0);
+   mSubscriptionsMap->AddParticipant(userID, name, picture);
 }
 
 void VirtualStudioPanel::OnDeviceWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg)
@@ -1663,7 +1759,6 @@ void VirtualStudioPanel::OnDeviceWssMessage(ConnectionHdl hdl, websocketpp::conf
    auto deviceID = std::string(document["id"].GetString());
    auto ownerID = std::string(document["ownerId"].GetString());
    mDeviceToOwnerMap[deviceID] = ownerID;
-   mOwnerToDeviceMap[ownerID] = deviceID;
 }
 
 void VirtualStudioPanel::OnMeterWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg)
@@ -1679,6 +1774,8 @@ void VirtualStudioPanel::OnMeterWssMessage(ConnectionHdl hdl, websocketpp::confi
       wxLogInfo("Error parsing JSON: %s", document.GetParseError());
       return;
    }
+
+   std::map<std::string, bool> seen;
 
    if (document["clients"].IsArray() && document["musicians"].IsArray()) {
       auto musicians = document["musicians"].GetArray();
@@ -1699,39 +1796,30 @@ void VirtualStudioPanel::OnMeterWssMessage(ConnectionHdl hdl, websocketpp::confi
          }
 
          if (!ownerID.empty()) {
+            seen[ownerID] = true;
             auto dbVals = musicians[idx].GetArray();
             auto leftDbVal = dbVals[0].GetDouble();
             auto rightDbVal = dbVals[1].GetDouble();
             //std::cout << "Device " << device << " owned by " << ownerID << " with left val " << leftDbVal << " and right val " << rightDbVal << std::endl;
 
-            auto participant = mSubscriptionsMap->GetParticipantByID(ownerID);
-            if (participant != nullptr) {
-               auto dB = std::max(leftDbVal, rightDbVal);
-               float linear = powf(10.0, dB/20.0);
-               participant->UpdateVolume(linear);
+            if (auto participant = mSubscriptionsMap->GetParticipantByID(ownerID)) {
+               float left = powf(10.0, leftDbVal/20.0);
+               float right = powf(10.0, rightDbVal/20.0);
+               participant->UpdateVolume(left, right);
+               //participant->SetShown(true);
             }
 
          }
          idx++;
       }
    }
-   /*
-      Value::ConstValueIterator itr;
-      for (itr = document["clients"].Begin(); itr != document.End(); ++itr) {
-         auto serverID = itr->GetObject()["id"].GetString();
-         auto serverName = itr->GetObject()["name"].GetString();
-         auto sessionID = itr->GetObject()["sessionId"].GetString();
-         auto enabled = itr->GetObject()["enabled"].GetBool();
-         auto managed = itr->GetObject()["managed"].GetBool();
-         if (!managed) {
-            continue;
-         }
 
-         serverIds.push_back(serverID);
-         serverNames.push_back(serverName);
+   /*
+   for (auto& participant : mSubscriptionsMap->GetMap()) {
+      if (!seen[participant.first]) {
+         participant.second->SetShown(false);
       }
    }
-   std::cout << "Meter: " << payload << std::endl;
    */
 }
 
@@ -1798,6 +1886,7 @@ void VirtualStudioPanel::InitServerWebsocket()
       std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "?auth_code=" + mAccessToken;
       //std::cout << "URL is: " << url << std::endl;
       SetUrl(client, url);
+      mServerClient = &client;
 
       try {
          client.run();
@@ -1841,6 +1930,7 @@ void VirtualStudioPanel::InitSubscriptionsWebsocket()
       std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "/subscriptions?auth_code=" + mAccessToken;
       //std::cout << "URL is: " << url << std::endl;
       SetUrl(client, url);
+      mSubscriptionsClient = &client;
 
       try {
          client.run();
@@ -1869,6 +1959,7 @@ void VirtualStudioPanel::InitDevicesWebsocket()
       std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "/devices?auth_code=" + mAccessToken;
       //std::cout << "URL is: " << url << std::endl;
       SetUrl(client, url);
+      mDevicesClient = &client;
 
       try {
          client.run();
@@ -1906,6 +1997,7 @@ void VirtualStudioPanel::InitMetersWebsocket()
       std::string url = "wss://" + mServerSessionID + ".jacktrip.cloud/meters?auth_code=" + secret;
       std::cout << "URL is: " << url << std::endl;
       SetUrl(client, url);
+      mMetersClient = &client;
 
       try {
          client.run();
@@ -1965,7 +2057,7 @@ void VirtualStudioPanel::FetchOwner(std::string ownerID)
             }
          }
          auto picture = std::string(document["picture"].GetString());
-         mSubscriptionsMap->AddParticipant(userID, name, picture, 0.0);
+         mSubscriptionsMap->AddParticipant(userID, name, picture);
       }
    );
 }
@@ -1973,7 +2065,6 @@ void VirtualStudioPanel::FetchOwner(std::string ownerID)
 void VirtualStudioPanel::DoClose()
 {
    mDeviceToOwnerMap.clear();
-   mOwnerToDeviceMap.clear();
    std::cout << "Stopping websocket in DoClose" << std::endl;
    StopWebsockets();
    std::cout << "Stopped websocket in DoClose" << std::endl;
@@ -2001,7 +2092,7 @@ void VirtualStudioPanel::SetStudio(std::string serverID, std::string accessToken
    } else {
       mServerID = serverID;
       mAccessToken = accessToken;
-      mParticipantsList->SetProject(mProject, mServerSampleRate);
+      mParticipantsList->SetProject(mProject, mServerID, mServerSampleRate);
       InitializeWebsockets();
    }
 }
@@ -2014,7 +2105,8 @@ void VirtualStudioPanel::ResetStudio()
    UpdateServerStatus("Disabled");
    UpdateServerEnabled(false);
    UpdateServerOwnerID("");
-
+   UpdateServerSampleRate(0);
+   UpdateServerBroadcast(0);
    mParticipantsList->Reset();
    mCurrentTrack.reset();
 }
