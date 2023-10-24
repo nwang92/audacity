@@ -112,6 +112,7 @@ class AUDACITY_DLL_API MeterPanel final
       HorizontalStereo,
       VerticalStereo,
       MixerTrackCluster, // Doesn't show menu, icon, or L/R labels, but otherwise like VerticalStereo.
+      JackTripCompact, // Doesnt' show ruler, but otherwise like VerticalStereo.
       HorizontalStereoCompact, // Thinner.
       VerticalStereoCompact, // Narrower.
    };
@@ -164,8 +165,6 @@ class AUDACITY_DLL_API MeterPanel final
     */
    void UpdateDisplay(unsigned numChannels,
                       int numFrames, const float *sampleData) override;
-
-   void SetDB(unsigned numChannels, int numFrames, float db);
 
    // Vaughan, 2010-11-29: This not currently used. See comments in MixerTrackCluster::UpdateMeter().
    //void UpdateDisplay(int numChannels, int numFrames,

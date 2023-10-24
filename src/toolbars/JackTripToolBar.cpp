@@ -1164,7 +1164,6 @@ void JackTripToolBar::ToggleStudioPanel(std::string serverID)
    if (panel.IsShown()) {
       panel.HidePanel();
    } else {
-      std::cout << "ShowPanel" << std::endl;
       panel.ShowPanel(serverID, mAccessToken, true);
    }
    /*
@@ -1289,7 +1288,6 @@ void JackTripToolBar::OnPanel(wxCommandEvent& event)
    if (panel.IsShown()) {
       panel.HidePanel();
    } else {
-      std::cout << "ShowPanel" << std::endl;
       panel.ShowPanel("e0a1369c-3f4f-4d46-821d-69ea7139095c", "", true);
    }
 }

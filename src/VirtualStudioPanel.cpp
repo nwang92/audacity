@@ -307,6 +307,7 @@ namespace
    {
       wxWeakRef<AudacityProject> mProject;
       std::shared_ptr<StudioParticipant> mParticipant;
+      double mSampleRate;
       std::shared_ptr<EffectSettingsAccess> mSettingsAccess;
 
       RealtimeEffectPicker* mEffectPicker { nullptr };
@@ -374,8 +375,8 @@ namespace
          bottomSizer->Add(bottomText, 1, wxLEFT | wxBOTTOM, 4);
 
          auto controlsSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
-         controlsSizer->Add(topSizer.release(), 1, wxLEFT | wxTOP, 4);
-         controlsSizer->Add(bottomSizer.release(), 1, wxLEFT | wxBOTTOM, 4);
+         controlsSizer->Add(topSizer.release(), 1, wxLEFT | wxTOP, 2);
+         controlsSizer->Add(bottomSizer.release(), 1, wxLEFT | wxBOTTOM, 2);
          //Central button with effect name, show settings
          // const auto optionsButton = safenew ThemedAButtonWrapper<AButton>(this, wxID_ANY);
          // optionsButton->SetImageIndices(0,
@@ -396,7 +397,7 @@ namespace
          // changeButton->SetTranslatableLabel(XO("Replace effect"));
          // changeButton->Bind(wxEVT_BUTTON, &ParticipantControl::OnChangeButtonClicked, this);
 
-         auto meter = safenew MeterPanel( mProject, this, wxID_ANY, false, wxDefaultPosition, wxSize( 20, 56 ), MeterPanel::Style::MixerTrackCluster, 0.1 );
+         auto meter = safenew MeterPanel( mProject, this, wxID_ANY, false, wxDefaultPosition, wxSize( 20, 56 ), MeterPanel::Style::JackTripCompact, 0.1 );
          meter->Reset(48000, true);
          mMeter = meter;
          /*
@@ -404,8 +405,8 @@ namespace
          dragArea->Disable();
          sizer->Add(dragArea, 0, wxLEFT | wxCENTER, 5);
          */
-         sizer->Add(enableButton, 0, wxLEFT | wxCENTER, 5);
-         sizer->Add(controlsSizer.release(), 1, wxLEFT | wxCENTER, 5);
+         sizer->Add(enableButton, 0, wxLEFT | wxCENTER, 4);
+         sizer->Add(controlsSizer.release(), 1, wxLEFT | wxCENTER, 0);
          //sizer->Add(optionsButton, 1, wxLEFT | wxCENTER, 5);
          //sizer->Add(changeButton, 0, wxLEFT | wxRIGHT | wxCENTER, 5);
          sizer->Add(meter, 0, wxLEFT | wxRIGHT | wxTOP | wxBOTTOM | wxCENTER, 0);
@@ -442,17 +443,21 @@ namespace
       }
 
       void SetParticipant(AudacityProject& project,
-         const std::shared_ptr<StudioParticipant>& participant)
+         const std::shared_ptr<StudioParticipant>& participant, double sampleRate)
       {
          mProject = &project;
          mParticipant = participant;
+         mSampleRate = sampleRate;
+         mMeter->Reset(sampleRate, true);
 
          mParticipantSubscription = mParticipant->Subscribe([this](ParticipantEvent evt) {
             if (evt.mType == ParticipantEvent::VOLUME_CHANGE) {
                if (mMeter) {
                   auto val = mParticipant->GetVolume();
-                  std::cout << "helloooooo " << val << std::endl;
-                  mMeter->SetDB(2, 2, val);
+                  float *numbers = new float[2];
+                  numbers[0] = val;
+                  numbers[1] = val;
+                  mMeter->UpdateDisplay(2, 1, numbers);
                }
             }
          });
@@ -469,7 +474,7 @@ namespace
       void RemoveFromList()
       {
          std::cout << "RemoveFromList" << std::endl;
-         if (mProject == nullptr || mParticipant == nullptr) {
+         if (mProject == nullptr || mSampleRate == 0 || mParticipant == nullptr) {
             return;
          }
 
@@ -501,7 +506,7 @@ namespace
       void OnOptionsClicked(wxCommandEvent& event)
       {
          std::cout << "OnOptionsClicked" << std::endl;
-         if (mProject == nullptr || mParticipant == nullptr) {
+         if (mProject == nullptr || mSampleRate == 0 || mParticipant == nullptr) {
             return;
          }
 
@@ -525,7 +530,7 @@ namespace
       void OnChangeButtonClicked(wxCommandEvent& event)
       {
          std::cout << "OnChangeButtonClicked" << std::endl;
-         if (mProject == nullptr || mParticipant == nullptr) {
+         if (mProject == nullptr || mSampleRate == 0 || mParticipant == nullptr) {
             return;
          }
 
@@ -610,6 +615,7 @@ class VirtualStudioParticipantListWindow
    , public PrefsListener
 {
    wxWeakRef<AudacityProject> mProject;
+   double mSampleRate;
    std::shared_ptr<SampleTrack> mTrack;
    AButton* mAddEffect{nullptr};
    wxStaticText* mParticipantsHint{nullptr};
@@ -748,14 +754,13 @@ public:
       {
          dropHintLine->Hide();
 
-         if(mProject == nullptr)
+         if(mProject == nullptr || mSampleRate == 0)
             return;
 
          // auto& effectList = RealtimeEffectList::Get(*mTrack);
          const auto from = event.GetSourceIndex();
          const auto to = event.GetTargetIndex();
-         std::cout << "From: " << from << std::endl;
-         std::cout << "To: " << to << std::endl;
+         std::cout << "Attempting move from " << from << " to " << to << std::endl;
 
          // if(from != to)
          // {
@@ -959,6 +964,7 @@ public:
    {
       mParticipantChangeSubscription.Reset();
       mProject = nullptr;
+      mSampleRate = 0;
       ReloadEffectsList();
       /*
       mEffectListItemMovedSubscription.Reset();
@@ -969,10 +975,11 @@ public:
       */
    }
 
-   void SetProject(AudacityProject& project)
+   void SetProject(AudacityProject& project, double sampleRate)
    {
       mEffectListItemMovedSubscription.Reset();
       mProject = &project;
+      mSampleRate = sampleRate;
       ReloadEffectsList();
       /*
       if (track)
@@ -1001,11 +1008,7 @@ public:
       mParticipantListContainer->Hide();
       mParticipantListContainer->GetSizer()->Clear(true);
 
-      auto isEmpty = mSubscriptionsMap->GetParticipantsCount() == 0;
-      if (isEmpty) {
-         mParticipantListContainer->Hide();
-         return;
-      }
+      bool isEmpty = true;
 
       wxArrayString userIDs;
       for (auto& participant : mSubscriptionsMap->GetMap()) {
@@ -1015,28 +1018,24 @@ public:
       wxSortedArrayString sortedUserIDs(userIDs);
       for(size_t i = 0, count = sortedUserIDs.GetCount(); i < count; ++i) {
          auto uid = std::string(sortedUserIDs[i].mb_str());
-         std::cout << "User ID: " << uid << std::endl;
          auto participant = mSubscriptionsMap->GetParticipantByID(std::string(sortedUserIDs[i].mb_str()));
-         participant->SetIndex(i);
-         InsertParticipantRow(i, participant);
+         if (participant) {
+            participant->SetIndex(i);
+            InsertParticipantRow(i, participant);
+            isEmpty = false;
+         }
       }
 
-      /*
-      auto isEmpty{true};
-      if(mTrack)
-      {
-         auto& effects = RealtimeEffectList::Get(*mTrack);
-         isEmpty = effects.GetStatesCount() == 0;
-         for(size_t i = 0, count = effects.GetStatesCount(); i < count; ++i)
-            InsertEffectRow(i, effects.GetStateAt(i));
+      if (isEmpty) {
+         mParticipantListContainer->Hide();
+      } else {
+         mAddEffect->SetEnabled(true);
+         //Workaround for GTK: Underlying GTK widget does not update
+         //its size when wxWindow size is set to zero
+         mParticipantListContainer->Show(true);
+         mParticipantsHint->Show(false);
+         mStudioLink->Show(false);
       }
-      */
-      mAddEffect->SetEnabled(true);
-      //Workaround for GTK: Underlying GTK widget does not update
-      //its size when wxWindow size is set to zero
-      mParticipantListContainer->Show(true);
-      mParticipantsHint->Show(false);
-      mStudioLink->Show(false);
 
       SendSizeEventToParent();
    }
@@ -1083,7 +1082,7 @@ public:
 
    void InsertParticipantRow(size_t index, const std::shared_ptr<StudioParticipant> p)
    {
-      if (mProject == nullptr) {
+      if (mProject == nullptr || mSampleRate == 0) {
          return;
       }
 
@@ -1093,7 +1092,7 @@ public:
 
       auto row = safenew ThemedWindowWrapper<ParticipantControl>(mParticipantListContainer, this, wxID_ANY);
       row->SetBackgroundColorIndex(clrEffectListItemBackground);
-      row->SetParticipant(*mProject, p);
+      row->SetParticipant(*mProject, p, mSampleRate);
       mParticipantListContainer->GetSizer()->Insert(index, row, 0, wxEXPAND);
    }
 };
@@ -1139,6 +1138,19 @@ StudioParticipant::StudioParticipant(wxWindow* parent, std::string id, std::stri
    mName = name;
    mPicture = picture;
    mVolume = volume;
+
+   if (!picture.empty()) {
+      if (!mImage.LoadFile(picture, wxBITMAP_TYPE_JPEG)) {
+         std::cout << "failed to load file: " << picture << std::endl;
+      }
+   }
+/*
+if (!hImage.LoadFile(wxT("horse.jpg"), wxBITMAP_TYPE_JPEG,))
+{
+	wxLogError(wxT("Can't load JPG image"));
+}
+*/
+
 }
 
 StudioParticipant::~StudioParticipant()
@@ -1186,7 +1198,6 @@ void StudioParticipant::QueueEvent(ParticipantEvent event)
 {
    BasicUI::CallAfter([this, event = std::move(event)]{ this->Publish(event); });
 }
-
 
 StudioParticipantMap::StudioParticipantMap(wxWindow* parent)
 {
@@ -1542,6 +1553,13 @@ void VirtualStudioPanel::UpdateServerEnabled(bool enabled) {
    std::cout << mServerEnabled << std::endl;
 }
 
+void VirtualStudioPanel::UpdateServerSampleRate(double sampleRate) {
+   if (mServerSampleRate == sampleRate) {
+      return;
+   }
+   mServerSampleRate = sampleRate;
+}
+
 void VirtualStudioPanel::ShowPanel(std::string serverID, std::string accessToken, bool focus)
 {
    if(serverID.empty() || accessToken.empty())
@@ -1604,6 +1622,7 @@ void VirtualStudioPanel::OnServerWssMessage(ConnectionHdl hdl, websocketpp::conf
    UpdateServerBanner(document["bannerURL"].GetString());
    UpdateServerSessionID(document["sessionId"].GetString());
    UpdateServerOwnerID(document["ownerId"].GetString());
+   UpdateServerSampleRate(document["sampleRate"].GetDouble());
    UpdateServerEnabled(document["enabled"].GetBool());
 }
 
@@ -1982,7 +2001,7 @@ void VirtualStudioPanel::SetStudio(std::string serverID, std::string accessToken
    } else {
       mServerID = serverID;
       mAccessToken = accessToken;
-      mParticipantsList->SetProject(mProject);
+      mParticipantsList->SetProject(mProject, mServerSampleRate);
       InitializeWebsockets();
    }
 }

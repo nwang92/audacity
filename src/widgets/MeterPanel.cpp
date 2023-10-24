@@ -337,11 +337,11 @@ MeterPanel::MeterPanel(AudacityProject *project,
 
    // Do this BEFORE UpdatePrefs()!
    mRuler.SetFonts(GetFont(), GetFont(), GetFont());
-   mRuler.SetFlip(mStyle != MixerTrackCluster);
+   mRuler.SetFlip(mStyle != MixerTrackCluster && mStyle != JackTripCompact);
    mRuler.SetLabelEdges(true);
    //mRuler.SetTickColour( wxColour( 0,0,255 ) );
 
-   if (mStyle != MixerTrackCluster)
+   if (mStyle != MixerTrackCluster && mStyle != JackTripCompact)
    {
       mSlider = std::make_unique<LWSlider>(this, XO(""),
          pos,
@@ -418,7 +418,7 @@ void MeterPanel::UpdatePrefs()
    mDB = gPrefs->Read(Key(wxT("Type")), wxT("dB")) == wxT("dB");
    mMeterDisabled = gPrefs->Read(Key(wxT("Disabled")), (long)0);
 
-   if (mDesiredStyle != MixerTrackCluster)
+   if (mDesiredStyle != MixerTrackCluster && mDesiredStyle != JackTripCompact)
    {
       wxString style = gPrefs->Read(Key(wxT("Style")));
       if (style == wxT("AutomaticStereo"))
@@ -513,7 +513,7 @@ void MeterPanel::OnPaint(wxPaintEvent & WXUNUSED(event))
    wxColour clrText = theTheme.Colour( clrTrackPanelText );
    wxColour clrBoxFill = theTheme.Colour( clrMedium );
 
-   if (mLayoutValid == false || (mStyle == MixerTrackCluster ))
+   if (mLayoutValid == false || (mStyle == MixerTrackCluster || mStyle == JackTripCompact))
    {
       // Create a NEW one using current size and select into the DC
       mBitmap = std::make_unique<wxBitmap>();
@@ -540,7 +540,7 @@ void MeterPanel::OnPaint(wxPaintEvent & WXUNUSED(event))
 //#endif
 
       // MixerTrackCluster style has no icon or L/R labels
-      if (mStyle != MixerTrackCluster)
+      if (mStyle != MixerTrackCluster && mStyle != JackTripCompact)
       {
          dc.SetFont(GetFont());
          dc.SetTextForeground( clrText );
@@ -700,7 +700,7 @@ void MeterPanel::OnPaint(wxPaintEvent & WXUNUSED(event))
    }
 #endif
 
-   if (mStyle != MixerTrackCluster)
+   if (mStyle != MixerTrackCluster && mStyle != JackTripCompact)
    {
       bool highlighted =
       wxRect{ mSliderPos, mSliderSize }.Contains(
@@ -734,7 +734,7 @@ void MeterPanel::OnMouse(wxMouseEvent &evt)
       Refresh();
    }
 
-   if (mStyle == MixerTrackCluster) // MixerTrackCluster style has no menu.
+   if (mStyle == MixerTrackCluster || mStyle == JackTripCompact) // MixerTrackCluster style has no menu.
       return;
 
    if (evt.Entering()) {
@@ -764,7 +764,7 @@ void MeterPanel::OnCharHook(wxKeyEvent& evt)
    case WXK_NUMPAD_ENTER:
    case WXK_WINDOWS_MENU:
    case WXK_MENU:
-      if (mStyle != MixerTrackCluster)
+      if (mStyle != MixerTrackCluster && mStyle != JackTripCompact)
          ShowMenu(GetClientRect().GetBottomLeft());
       else
          evt.Skip();
@@ -777,7 +777,7 @@ void MeterPanel::OnCharHook(wxKeyEvent& evt)
 
 void MeterPanel::OnContext(wxContextMenuEvent &evt)
 {
-   if (mStyle != MixerTrackCluster) // MixerTrackCluster style has no menu.
+   if (mStyle != MixerTrackCluster && mStyle != JackTripCompact) // MixerTrackCluster style has no menu.
    {
       ShowMenu(GetClientRect().GetBottomLeft());
    }
@@ -963,7 +963,6 @@ static float ToDB(float v, float range)
 void MeterPanel::UpdateDisplay(
    unsigned numChannels, int numFrames, const float *sampleData)
 {
-   std::cout << "UpdateDisplay called " << numChannels << " " << numFrames << std::endl;
    auto sptr = sampleData;
    auto num = std::min(numChannels, mNumBars);
    MeterUpdateMsg msg;
@@ -994,24 +993,6 @@ void MeterPanel::UpdateDisplay(
    }
    for(unsigned int j=0; j<mNumBars; j++)
       msg.rms[j] = sqrt(msg.rms[j]/numFrames);
-
-   mQueue.Put(msg);
-}
-
-void MeterPanel::SetDB(unsigned numChannels, int numFrames, float db)
-{
-   auto num = std::min(numChannels, mNumBars);
-   MeterUpdateMsg msg;
-
-   memset(&msg, 0, sizeof(msg));
-   msg.numFrames = numFrames;
-
-   for(int i=0; i<numFrames; i++) {
-      for(unsigned int j=0; j<num; j++) {
-         msg.peak[j] = db;
-         msg.rms[j] = db;
-      }
-   }
 
    mQueue.Put(msg);
 }
@@ -1329,7 +1310,7 @@ void MeterPanel::HandleLayout(wxDC &dc)
    int rside;
 
    // MixerTrackCluster has no L/R labels or icon
-   if (mStyle != MixerTrackCluster)
+   if (mStyle != MixerTrackCluster && mStyle != JackTripCompact)
    {
       if (mDesiredStyle == AutomaticStereo)
       {
@@ -1362,9 +1343,36 @@ void MeterPanel::HandleLayout(wxDC &dc)
    default:
       wxPrintf(wxT("Style not handled yet!\n"));
       break;
+   case JackTripCompact:
+      // height is now the entire height of the meter canvas
+      height -= top + gap;
+
+      // barw is half of the canvas while allowing for a gap between meters
+      barw = (width - gap) / 2;
+
+      // barh is now the height of the canvas
+      barh = height;
+
+      // We always have 2 bars
+      mNumBars = 2;
+
+      // Save dimensions of the left bevel
+      mBar[0].b = wxRect(left, top, barw, barh);
+
+      // Save dimensions of the right bevel
+      mBar[1].b = mBar[0].b;
+      mBar[1].b.SetLeft(mBar[0].b.GetRight() + 1 + gap); // +1 for right edge
+
+      // Set bar and clipping indicator dimensions
+      SetBarAndClip(0, true);
+      SetBarAndClip(1, true);
+
+      mRuler.SetBounds(0, 0, 0, 0);
+      mRuler.OfflimitsPixels(0, 0);
+      break;
    case MixerTrackCluster:
       // width is now the entire width of the meter canvas
-      //width -= mRulerWidth + left;
+      width -= mRulerWidth + left;
 
       // height is now the entire height of the meter canvas
       height -= top + gap;
@@ -1389,14 +1397,10 @@ void MeterPanel::HandleLayout(wxDC &dc)
       SetBarAndClip(0, true);
       SetBarAndClip(1, true);
 
-      /*
       mRuler.SetBounds(mBar[1].r.GetRight() + 1,   // +1 for the bevel
                        mBar[1].r.GetTop(),
                        mWidth,
                        mBar[1].r.GetBottom());
-      mRuler.OfflimitsPixels(0, 0);
-      */
-      mRuler.SetBounds(0, 0, 0, 0);
       mRuler.OfflimitsPixels(0, 0);
       break;
    case VerticalStereo:
@@ -2119,7 +2123,7 @@ void MeterPanel::OnPreferences(wxCommandEvent & WXUNUSED(event))
 
 wxString MeterPanel::Key(const wxString & key) const
 {
-   if (mStyle == MixerTrackCluster)
+   if (mStyle == MixerTrackCluster || mStyle == JackTripCompact)
    {
       return wxT("/Meter/Mixerboard/") + key;
    }

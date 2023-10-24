@@ -12,6 +12,8 @@
 
 #include <math.h>
 #include <memory>
+
+#include <wx/image.h>
 #include <wx/scrolwin.h>
 #include <wx/weakref.h>
 #include <wx/arrstr.h>
@@ -115,7 +117,8 @@ private:
    std::string mID;
    std::string mName;
    std::string mPicture;
-   std::unique_ptr<wxBitmap> mBitmap;
+   wxBitmap mBitmap;
+   wxImage mImage;
    int mIndex;
    float mVolume;
 };
@@ -134,6 +137,7 @@ public:
    unsigned long GetParticipantsCount();
    void QueueEvent(ParticipantEvent event);
    void Print();
+   wxImage* DownloadImage(std::string url);
 
 private:
    wxWindow* mParent;
@@ -168,6 +172,7 @@ class VirtualStudioPanel : public wxPanel
    std::string mServerSessionID;
    std::string mServerOwnerID;
    std::string mServerStatus;
+   double mServerSampleRate;
    bool mServerEnabled;
 
    boost::thread mServerThread;
@@ -224,6 +229,7 @@ private:
    void UpdateServerSessionID(std::string sessionID);
    void UpdateServerOwnerID(std::string ownerID);
    void UpdateServerEnabled(bool enabled);
+   void UpdateServerSampleRate(double sampleRate);
 
    void OnServerWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg);
    void OnSubscriptionWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg);
