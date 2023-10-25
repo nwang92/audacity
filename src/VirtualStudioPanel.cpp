@@ -791,7 +791,9 @@ namespace
       RealtimeEffectPicker* mEffectPicker { nullptr };
 
       ThemedAButtonWrapper<AButton>* mChangeButton{nullptr};
-      AButton* mEnableButton{nullptr};
+      ThemedAButtonWrapper<AButton>* mEnableButton{nullptr};
+      ThemedAButtonWrapper<AButton>* mMuteButton{nullptr};
+      ASlider* mVolumeSlider{nullptr};
       ThemedAButtonWrapper<AButton>* mOptionsButton{};
       wxStaticText* mParticipantName{nullptr};
       ParticipantBars *mMeter{nullptr};
@@ -822,6 +824,7 @@ namespace
          MovableControl::SetBackgroundStyle(wxBG_STYLE_PAINT);
          MovableControl::Create(parent, winid, pos, size, wxNO_BORDER | wxWANTS_CHARS);
 
+         Bind(wxEVT_PAINT, &ParticipantControl::OnPaint, this);
          Bind(wxEVT_SET_FOCUS, &ParticipantControl::OnFocusChange, this);
          Bind(wxEVT_KILL_FOCUS, &ParticipantControl::OnFocusChange, this);
 
@@ -833,11 +836,10 @@ namespace
          enableButton->SetImageIndices(0, bmpEffectOff, bmpEffectOff, bmpEffectOn, bmpEffectOn, bmpEffectOff);
          enableButton->SetButtonToggles(true);
          enableButton->SetBackgroundColorIndex(clrEffectListItemBackground);
-         mEnableButton = enableButton;
-
          enableButton->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
             std::cout << "enableButton clicked" << std::endl;
          });
+         mEnableButton = enableButton;
 
          auto topSizer = std::make_unique<wxBoxSizer>(wxHORIZONTAL);
          auto participantName = safenew ThemedWindowWrapper<wxStaticText>(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
@@ -846,14 +848,64 @@ namespace
          topSizer->Add(mParticipantName, 1, wxLEFT | wxTOP | wxCENTER, 4);
 
          auto bottomSizer = std::make_unique<wxBoxSizer>(wxHORIZONTAL);
-         auto bottomText = safenew ThemedWindowWrapper<wxStaticText>(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
-         bottomText->SetForegroundColorIndex(clrTrackPanelText);
-         bottomText->SetLabel("Testing testing testing");
-         bottomSizer->Add(bottomText, 1, wxLEFT | wxBOTTOM, 4);
+
+         //Mute button
+         auto muteButton = safenew ThemedAButtonWrapper<AButton>(this);
+         muteButton->SetTranslatableLabel(XO("Mute"));
+         muteButton->SetToolTip(XO("Mute"));
+         muteButton->SetImageIndices(0, bmpMic, bmpMic, bmpMic, bmpMic, bmpMic);
+         muteButton->SetButtonToggles(true);
+         muteButton->SetBackgroundColorIndex(clrEffectListItemBackground);
+         muteButton->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+            if (mParticipant) {
+               mParticipant->SetMute(!mParticipant->GetMute());
+               mParticipant->SyncDeviceAPI();
+            }
+         });
+         mMuteButton = muteButton;
+
+         //Add a slider that controls the speed of playback.
+         auto volumeSlider = safenew ThemedWindowWrapper<ASlider>(this,
+            wxID_ANY,
+            XO("Input Volume"),
+            wxDefaultPosition,
+            wxDefaultSize,
+            ASlider::Options{}
+               .Style( PERCENT_SLIDER )
+               // 20 steps using page up/down, and 60 using arrow keys
+               .Line( 0.05f )
+               .Page( 0.05f )
+               .DrawTicks(true)
+               .StepValue(0.05f)
+               //.ShowLabels(false)
+         );
+         //auto sz = bottomSizer->GetSize();
+         //wxSize sz = GetSize();
+         //SetSizeHints(sz.x, std::min(sz.y, 600));
+         //volumeSlider->SetSizeHints(wxSize(150, 25), wxSize(sz.x, 25));
+         volumeSlider->SetMinSize(wxSize(120, 20));
+         volumeSlider->Set(1);
+         volumeSlider->SetLabel(_("Input Volume"));
+         volumeSlider->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
+            if (mParticipant && mVolumeSlider) {
+               float val = mVolumeSlider->Get()*100;
+               int valInt = (int)val;
+               mParticipant->SetCaptureVolume(valInt);
+               mParticipant->SyncDeviceAPI();
+            }
+         });
+         mVolumeSlider = volumeSlider;
+
+         //auto bottomText = safenew ThemedWindowWrapper<wxStaticText>(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
+         //bottomText->SetForegroundColorIndex(clrTrackPanelText);
+         //bottomText->SetLabel("Testing testing testing");
+
+         bottomSizer->Add(muteButton, 0, wxEXPAND, 4);
+         bottomSizer->Add(volumeSlider, 1, wxEXPAND, 4);
 
          auto controlsSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
-         controlsSizer->Add(topSizer.release(), 1, wxLEFT | wxTOP, 2);
-         controlsSizer->Add(bottomSizer.release(), 1, wxLEFT | wxBOTTOM, 2);
+         controlsSizer->Add(topSizer.release(), 1, wxLEFT | wxEXPAND, 2);
+         controlsSizer->Add(bottomSizer.release(), 1, wxEXPAND, 2);
          //Central button with effect name, show settings
          // const auto optionsButton = safenew ThemedAButtonWrapper<AButton>(this, wxID_ANY);
          // optionsButton->SetImageIndices(0,
@@ -882,10 +934,10 @@ namespace
          sizer->Add(dragArea, 0, wxLEFT | wxCENTER, 5);
          */
          sizer->Add(enableButton, 0, wxLEFT | wxCENTER, 4);
-         sizer->Add(controlsSizer.release(), 1, wxLEFT | wxCENTER, 0);
+         sizer->Add(controlsSizer.release(), 1, wxLEFT | wxCENTER, 4);
          //sizer->Add(optionsButton, 1, wxLEFT | wxCENTER, 5);
          //sizer->Add(changeButton, 0, wxLEFT | wxRIGHT | wxCENTER, 5);
-         sizer->Add(meter, 0, wxLEFT | wxRIGHT | wxTOP | wxBOTTOM | wxCENTER, 0);
+         sizer->Add(meter, 0, wxLEFT | wxRIGHT | wxTOP | wxBOTTOM | wxCENTER, 4);
          //mChangeButton = changeButton;
          //mOptionsButton = optionsButton;
 
@@ -914,11 +966,25 @@ namespace
          mParticipantSubscription = mParticipant->Subscribe([this](const ParticipantEvent& evt) {
             switch (evt.mType)
             {
-            case ParticipantEvent::VOLUME_CHANGE:
+            case ParticipantEvent::METER_CHANGE:
                if (this->IsShown() && mParticipant->GetID() == evt.mUid && mMeter) {
-                  //std::cout << "hello " << numbers[0] << numbers[1] << std::endl;
-                  //mMeter->UpdateDisplay(2, 1, numbers);
                   mMeter->UpdateDisplay(1, mParticipant->GetLeftVolume(), mParticipant->GetRightVolume());
+               }
+               break;
+            case ParticipantEvent::VOLUME_CHANGE:
+               if (this->IsShown() && mParticipant->GetID() == evt.mUid && mVolumeSlider) {
+                  mVolumeSlider->Set(mParticipant->GetCaptureVolume());
+               }
+               break;
+            case ParticipantEvent::MUTE_CHANGE:
+               if (this->IsShown() && mParticipant->GetID() == evt.mUid && mMuteButton) {
+                  if (mParticipant->GetMute()) {
+                     mMuteButton->PushDown();
+                     mMuteButton->SetBackgroundColour(theTheme.Colour(clrMeterInputLightPen));
+                  } else {
+                     mMuteButton->PopUp();
+                     mMuteButton->SetBackgroundColour(theTheme.Colour(clrEffectListItemBackground));
+                  }
                }
                break;
             /* TODO: Pretty sure this doesn't actually work
@@ -956,6 +1022,18 @@ namespace
             auto img = mParticipant->GetImage();
             if (mEnableButton) {
                mEnableButton->SetImages(img, img, img, img, img);
+            }
+            if (mMuteButton) {
+               if (mParticipant->GetMute()) {
+                  mMuteButton->PushDown();
+                  mMuteButton->SetBackgroundColour(theTheme.Colour(clrMeterInputLightPen));
+               } else {
+                  mMuteButton->PopUp();
+                  mMuteButton->SetBackgroundColour(theTheme.Colour(clrEffectListItemBackground));
+               }
+            }
+            if (mVolumeSlider) {
+               mVolumeSlider->Set(mParticipant->GetCaptureVolume());
             }
             if (!showHidden) {
                auto device = mParticipant->GetDeviceID();
@@ -1073,6 +1151,23 @@ namespace
          // }
       }
 
+      void OnPaint(wxPaintEvent&)
+      {
+         wxBufferedPaintDC dc(this);
+         const auto rect = wxRect(GetSize());
+
+         dc.SetPen(*wxTRANSPARENT_PEN);
+         dc.SetBrush(GetBackgroundColour());
+         dc.DrawRectangle(rect);
+
+         dc.SetPen(theTheme.Colour(clrEffectListItemBorder));
+         dc.SetBrush(theTheme.Colour(clrEffectListItemBorder));
+         dc.DrawLine(rect.GetBottomLeft(), rect.GetBottomRight());
+
+         if(HasFocus())
+            AColor::DrawFocus(dc, GetClientRect().Deflate(3, 3));
+      }
+
       void OnFocusChange(wxFocusEvent& evt)
       {
          Refresh(false);
@@ -1118,6 +1213,7 @@ public:
                      const wxString& name = wxPanelNameStr)
       : wxScrolledWindow(parent, winid, pos, size, style, name)
    {
+      // this is a convenience flag to debug participants by showing all subscribers of this studio
       mShowHiddenParticipants = false;
       Bind(wxEVT_SIZE, &VirtualStudioParticipantListWindow::OnSizeChanged, this);
 #ifdef __WXMSW__
@@ -1663,6 +1759,11 @@ std::string StudioParticipant::GetDeviceID()
    return mDeviceID;
 }
 
+bool StudioParticipant::GetMute()
+{
+   return mMute;
+}
+
 float StudioParticipant::GetLeftVolume()
 {
    return mLeftVolume;
@@ -1673,13 +1774,27 @@ float StudioParticipant::GetRightVolume()
    return mRightVolume;
 }
 
-void StudioParticipant::UpdateVolume(float left, float right)
+float StudioParticipant::GetCaptureVolume()
+{
+   return mCaptureVolume/100.0f;
+}
+
+void StudioParticipant::UpdateMeter(float left, float right)
 {
    if (mLeftVolume == left && mRightVolume == right) {
       return;
    }
    mLeftVolume = left;
    mRightVolume = right;
+   QueueEvent({ ParticipantEvent::METER_CHANGE, mID });
+}
+
+void StudioParticipant::SetCaptureVolume(int volume)
+{
+   if (mCaptureVolume == volume) {
+      return;
+   }
+   mCaptureVolume = volume;
    QueueEvent({ ParticipantEvent::VOLUME_CHANGE, mID });
 }
 
@@ -1697,6 +1812,26 @@ bool StudioParticipant::SetDeviceID(std::string deviceID)
    return true;
 }
 
+bool StudioParticipant::SetMute(bool mute)
+{
+
+   if (mMute == mute) {
+      return false;
+   }
+   mMute = mute;
+   QueueEvent({ ParticipantEvent::MUTE_CHANGE, mID });
+   return true;
+}
+
+void StudioParticipant::SyncDeviceAPI()
+{
+   if (mDeviceID.empty()) {
+      return;
+   }
+   auto vsp = dynamic_cast<VirtualStudioPanel*>(mParent);
+   vsp->SyncDeviceAPI(mDeviceID, mMute, mCaptureVolume);
+}
+
 std::string StudioParticipant::GetDownloadLocalDir()
 {
    auto tempDefaultLoc = TempDirectory::DefaultTempDir();
@@ -1705,7 +1840,6 @@ std::string StudioParticipant::GetDownloadLocalDir()
 
 void StudioParticipant::FetchImage()
 {
-   std::cout << "Picture URL: " << mPicture << std::endl;
    if (mPicture.empty() || mPicture.rfind("http") != 0) {
       return;
    }
@@ -1814,10 +1948,10 @@ void StudioParticipantMap::AddParticipant(std::string id, std::string name, std:
    QueueEvent({ ParticipantEvent::REFRESH, id });
 }
 
-void StudioParticipantMap::UpdateParticipantVolume(std::string id, float left, float right)
+void StudioParticipantMap::UpdateParticipantMeter(std::string id, float left, float right)
 {
    if (auto participant = mMap[id]) {
-      participant->UpdateVolume(left, right);
+      participant->UpdateMeter(left, right);
    }
 }
 
@@ -1829,6 +1963,21 @@ void StudioParticipantMap::UpdateParticipantDevice(std::string id, std::string d
       }
    }
 }
+
+void StudioParticipantMap::UpdateParticipantCaptureVolume(std::string id, int volume)
+{
+   if (auto participant = mMap[id]) {
+      participant->SetCaptureVolume(volume);
+   }
+}
+
+void StudioParticipantMap::UpdateParticipantMute(std::string id, bool mute)
+{
+   if (auto participant = mMap[id]) {
+      participant->SetMute(mute);
+   }
+}
+
 
 unsigned long StudioParticipantMap::GetParticipantsCount()
 {
@@ -1972,80 +2121,6 @@ VirtualStudioPanel::VirtualStudioPanel(
 
    Bind(wxEVT_CHAR_HOOK, &VirtualStudioPanel::OnCharHook, this);
 
-   mUndoSubscription = UndoManager::Get(mProject).Subscribe(
-      [this](UndoRedoMessage message)
-      {
-         if (
-            message.type == UndoRedoMessage::Type::Purge ||
-            message.type == UndoRedoMessage::Type::BeginPurge ||
-            message.type == UndoRedoMessage::Type::EndPurge)
-            return;
-
-         auto& trackList = TrackList::Get(mProject);
-
-         // Realtime effect UI is only updated on Undo or Redo
-         auto waveTracks = trackList.Leaders<WaveTrack>();
-
-         if (
-            message.type == UndoRedoMessage::Type::UndoOrRedo ||
-            message.type == UndoRedoMessage::Type::Reset)
-         {
-            for (auto waveTrack : waveTracks)
-               UpdateRealtimeEffectUIData(*waveTrack);
-         }
-
-         // But mPotentiallyRemovedTracks processing happens as fast as possible.
-         // This event is fired right after the track is deleted, so we do not
-         // hold the strong reference to the track much longer than need.
-         if (mPotentiallyRemovedTracks.empty())
-            return;
-
-         // Collect RealtimeEffectUIs that are currently shown
-         // for the potentially removed tracks
-         std::vector<RealtimeEffectStateUI*> shownUIs;
-
-         for (auto track : mPotentiallyRemovedTracks)
-         {
-            // By construction, track cannot be null
-            assert(track != nullptr);
-
-            VisitRealtimeEffectStateUIs(
-               *track,
-               [&shownUIs](auto& ui)
-               {
-                  if (ui.IsShown())
-                     shownUIs.push_back(&ui);
-               });
-         }
-
-         // For every UI shown - check if the corresponding state
-         // is reachable from the current track list.
-         for (auto effectUI : shownUIs)
-         {
-            bool reachable = false;
-
-            for (auto track : waveTracks)
-            {
-               VisitRealtimeEffectStateUIs(
-                  *track,
-                  [effectUI, &reachable](auto& ui)
-                  {
-                     if (effectUI == &ui)
-                        reachable = true;
-                  });
-
-               if (reachable)
-                  break;
-            }
-
-            if (!reachable)
-               // Don't need to autosave for an unreachable state
-               effectUI->Hide();
-         }
-
-         mPotentiallyRemovedTracks.clear();
-      });
-
    Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent&) {
       HidePanel(); });
 }
@@ -2087,6 +2162,14 @@ void VirtualStudioPanel::UpdateServerBanner(std::string banner)
    mServerBanner = banner;
 }
 
+void VirtualStudioPanel::UpdateServerAdmin(bool admin)
+{
+   if (mServerAdmin == admin) {
+      return;
+   }
+   mServerAdmin = admin;
+}
+
 void VirtualStudioPanel::UpdateServerSessionID(std::string sessionID)
 {
    if (mServerSessionID == sessionID) {
@@ -2117,9 +2200,12 @@ void VirtualStudioPanel::UpdateServerEnabled(bool enabled) {
    }
    mServerEnabled = enabled;
    if (enabled) {
+      InitMetersWebsocket();
       mStudioOnline->PushDown();
    } else {
+      StopMetersWebsocket();
       mStudioOnline->PopUp();
+
    }
 }
 
@@ -2135,6 +2221,47 @@ void VirtualStudioPanel::UpdateServerBroadcast(int broadcast) {
       return;
    }
    mServerBroadcast = broadcast;
+}
+
+void VirtualStudioPanel::SyncDeviceAPI(std::string deviceID, bool mute, int captureVolume) {
+   if (mServerID.empty() || mAccessToken.empty() || deviceID.empty()) {
+      return;
+   }
+
+   // generate payload
+   rapidjson::Document document;
+   document.SetObject();
+
+   wxString wxServerID(mServerID);
+   document.AddMember(
+      "serverId",
+      rapidjson::Value(wxServerID.data(), wxServerID.length(), document.GetAllocator()),
+      document.GetAllocator());
+   document.AddMember("captureMute", rapidjson::Value(mute), document.GetAllocator());
+   document.AddMember("captureVolume", rapidjson::Value(captureVolume), document.GetAllocator());
+
+   rapidjson::StringBuffer buffer;
+   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+   document.Accept(writer);
+   auto payload = std::string(buffer.GetString());
+
+   const auto url = kApiBaseUrl + "/api/devices/" + deviceID;
+   audacity::network_manager::Request request(url);
+   request.setHeader("Authorization", "Bearer " + mAccessToken);
+   request.setHeader("Content-Type", "application/json");
+   request.setHeader("Accept", "application/json");
+
+   auto response = audacity::network_manager::NetworkManager::GetInstance().doPut(request, payload.data(), payload.size());
+   response->setRequestFinishedCallback(
+      [response, this](auto)
+      {
+         const auto httpCode = response->getHTTPCode();
+         wxLogInfo("SyncDeviceAPI HTTP code: %d", httpCode);
+
+         if (httpCode != 200)
+            return;
+      }
+   );
 }
 
 void VirtualStudioPanel::ShowPanel(std::string serverID, std::string accessToken, bool focus)
@@ -2196,6 +2323,10 @@ void VirtualStudioPanel::OnServerWssMessage(ConnectionHdl hdl, websocketpp::conf
       return;
    }
 
+   // skip warning/alert messages passed on this socket
+   if (document.HasMember("message")) {
+      return;
+   }
    UpdateServerName(document["name"].GetString());
    UpdateServerStatus(document["status"].GetString());
    std::string banner;
@@ -2203,6 +2334,7 @@ void VirtualStudioPanel::OnServerWssMessage(ConnectionHdl hdl, websocketpp::conf
       banner = document["bannerURL"].GetString();
    }
    UpdateServerBanner(banner);
+   //UpdateServerAdmin(document["admin"].GetBool());
    UpdateServerSessionID(document["sessionId"].GetString());
    UpdateServerOwnerID(document["ownerId"].GetString());
    UpdateServerSampleRate(document["sampleRate"].GetDouble());
@@ -2247,8 +2379,12 @@ void VirtualStudioPanel::OnDeviceWssMessage(ConnectionHdl hdl, websocketpp::conf
    auto deviceID = std::string(document["id"].GetString());
    auto ownerID = std::string(document["ownerId"].GetString());
    auto serverID = std::string(document["serverId"].GetString());
+   auto captureMute = document["captureMute"].GetBool();
+   auto captureVolume = document["captureVolume"].GetInt();
    if (serverID == mServerID) {
       mDeviceToOwnerMap[deviceID] = ownerID;
+      mSubscriptionsMap->UpdateParticipantMute(ownerID, captureMute);
+      mSubscriptionsMap->UpdateParticipantCaptureVolume(ownerID, captureVolume);
    } else {
       mDeviceToOwnerMap.erase(deviceID);
    }
@@ -2296,7 +2432,7 @@ void VirtualStudioPanel::OnMeterWssMessage(ConnectionHdl hdl, websocketpp::confi
             auto rightDbVal = dbVals[1].GetDouble();
             float left = powf(10.0, leftDbVal/20.0);
             float right = powf(10.0, rightDbVal/20.0);
-            mSubscriptionsMap->UpdateParticipantVolume(ownerID, left, right);
+            mSubscriptionsMap->UpdateParticipantMeter(ownerID, left, right);
             mSubscriptionsMap->UpdateParticipantDevice(ownerID, device);
          }
          idx++;
@@ -2368,6 +2504,7 @@ void VirtualStudioPanel::InitializeWebsockets()
    InitServerWebsocket();
    InitSubscriptionsWebsocket();
    InitDevicesWebsocket();
+   InitMetersWebsocket();
 }
 
 void VirtualStudioPanel::StopWebsockets()
@@ -2477,7 +2614,7 @@ void VirtualStudioPanel::InitDevicesWebsocket()
 void VirtualStudioPanel::InitMetersWebsocket()
 {
    std::cout << "InitMetersWebsocket called" << std::endl;
-   if (mServerStatus != "Ready" || mServerID.empty() || mServerSessionID.empty()) {
+   if (!mServerEnabled || mServerStatus != "Ready" || mServerID.empty() || mServerSessionID.empty()) {
       return;
    }
    if (mMetersClient || mMetersThread) {

@@ -79,38 +79,17 @@ struct ParticipantEvent
 {
    enum Type {
       // Posted when volume is changed
+      METER_CHANGE,
+      // Posted when volume is changed
       VOLUME_CHANGE,
-
+      // Posted when mute is changed
+      MUTE_CHANGE,
       // Posted when participant is hidden
       HIDE,
-
       // Posted when participant is shown
       SHOW,
-
       // Posted when a new participant is added or removed
       REFRESH,
-
-      //! Posted when the set of selected tracks changes.
-      SELECTION_CHANGE,
-
-      //! Posted when certain fields of a track change.
-      TRACK_DATA_CHANGE,
-
-      //! Posted when a track needs to be scrolled into view; leader track only
-      TRACK_REQUEST_VISIBLE,
-
-      //! Posted when tracks are reordered but otherwise unchanged.
-      /*! mpTrack points to the moved track that is earliest in the New ordering. */
-      PERMUTED,
-
-      //! Posted when some track changed its height.
-      RESIZING,
-
-      //! Posted when a track has been deleted from a tracklist. Also posted when one track replaces another
-      /*! mpTrack points to the removed track. It is expected, that track is valid during the event.
-       *! mExtra is 1 if the track is being replaced by another track, 0 otherwise.
-       */
-      DELETION,
    };
 
    ParticipantEvent( Type type, std::string uid = "")
@@ -137,10 +116,16 @@ public:
    std::string GetPicture();
    wxImage GetImage();
    std::string GetDeviceID();
+   float GetCaptureVolume();
+   bool GetMute();
    float GetLeftVolume();
    float GetRightVolume();
-   void UpdateVolume(float left, float right);
+   void UpdateMeter(float left, float right);
+   void SetCaptureVolume(int volume);
    bool SetDeviceID(std::string deviceID);
+   bool SetMute(bool mute);
+   void SyncDeviceAPI();
+
    std::string GetDownloadLocalDir();
    void FetchImage();
    void LoadImage();
@@ -152,6 +137,8 @@ private:
    std::string mName;
    std::string mPicture;
    std::string mDeviceID;
+   int mCaptureVolume;
+   bool mMute;
    wxBitmap mBitmap;
    wxImage mImage;
    std::string mImageFile;
@@ -171,8 +158,10 @@ public:
    std::map<std::string, std::shared_ptr<StudioParticipant>> GetMap();
    std::shared_ptr<StudioParticipant> GetParticipantByID(std::string id);
    void AddParticipant(std::string id, std::string name, std::string picture);
-   void UpdateParticipantVolume(std::string id, float left, float right);
+   void UpdateParticipantMeter(std::string id, float left, float right);
    void UpdateParticipantDevice(std::string id, std::string device);
+   void UpdateParticipantCaptureVolume(std::string id, int volume);
+   void UpdateParticipantMute(std::string, bool mute);
    unsigned long GetParticipantsCount();
    void Clear();
    void QueueEvent(ParticipantEvent event);
@@ -200,8 +189,6 @@ class VirtualStudioPanel : public wxPanel
    wxWindow* mActions{nullptr};
    AudacityProject& mProject;
 
-   Observer::Subscription mUndoSubscription;
-
    std::string mServerID;
    std::string mAccessToken;
    std::string mServerName;
@@ -212,6 +199,7 @@ class VirtualStudioPanel : public wxPanel
    int mServerBroadcast = 0;
    double mServerSampleRate = 0;
    bool mServerEnabled = 0;
+   bool mServerAdmin = 0;
 
    std::shared_ptr<WSSClient> mServerClient{nullptr};
    std::shared_ptr<boost::thread> mServerThread{nullptr};
@@ -224,7 +212,6 @@ class VirtualStudioPanel : public wxPanel
 
    StudioParticipantMap* mSubscriptionsMap{nullptr};
    std::map<std::string, std::string> mDeviceToOwnerMap;
-   std::vector<std::shared_ptr<SampleTrack>> mPotentiallyRemovedTracks;
 
    // VirtualStudioPanel is wrapped using ThemedWindowWrapper,
    // so we cannot subscribe to Prefs directly
@@ -245,16 +232,12 @@ public:
 
    ~VirtualStudioPanel() override;
 
+   void SyncDeviceAPI(std::string deviceID, bool mute, int captureVolume);
    void ShowPanel(std::string serverID, std::string accessToken, bool focus);
    void HidePanel();
    void DoClose();
    void OnJoin(const wxCommandEvent& event);
    StudioParticipantMap* GetSubscriptionsMap();
-
-   /**
-    * \brief Shows effects from the effect stack of the track
-    * \param track Pointer to the existing track, or null
-    */
    void SetStudio(std::string serverID, std::string accessToken);
    void ResetStudio();
 
@@ -267,6 +250,7 @@ private:
    void UpdateServerName(std::string name);
    void UpdateServerStatus(std::string status);
    void UpdateServerBanner(std::string banner);
+   void UpdateServerAdmin(bool admin);
    void UpdateServerSessionID(std::string sessionID);
    void UpdateServerOwnerID(std::string ownerID);
    void UpdateServerEnabled(bool enabled);
