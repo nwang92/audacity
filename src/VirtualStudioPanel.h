@@ -30,9 +30,10 @@
 #endif
 #include <rapidjson/document.h>
 
-#include "./widgets/MeterPanel.h"
+//#include "./widgets/MeterPanel.h"
 #include "ThemedWrappers.h"
 #include "Observer.h"
+#include "Decibels.h"
 
 const std::string kApiHost = "app.jacktrip.org";
 const std::string kApiBaseUrl = "https://" + kApiHost;
@@ -51,6 +52,23 @@ class wxBitmapButton;
 
 class VirtualStudioParticipantListWindow;
 class AudacityProject;
+
+const int kMaxVSMeterBars = 2;
+
+struct VSMeterBar {
+   bool   vert;
+   wxRect b;         // Bevel around bar
+   wxRect r;         // True bar drawing area
+   float  peak;
+   float  rms;
+   float  peakHold;
+   double peakHoldTime;
+   wxRect rClip;
+   bool   clipping;
+   bool   isclipping; //ANSWER-ME: What's the diff between these bools?! "clipping" vs "isclipping" is not clear.
+   int    tailPeakCount;
+   float  peakPeakHold;
+};
 
 //! Notification of changes in individual participants of StudioParticipantMap, or of StudioParticipantMap's composition
 struct ParticipantEvent
@@ -146,6 +164,7 @@ public:
    void AddParticipant(std::string id, std::string name, std::string picture);
    void UpdateParticipantVolume(std::string id, float left, float right);
    unsigned long GetParticipantsCount();
+   void Clear();
    void QueueEvent(ParticipantEvent event);
    void Print();
    wxImage* DownloadImage(std::string url);
@@ -171,9 +190,6 @@ class VirtualStudioPanel : public wxPanel
    wxWindow* mActions{nullptr};
    AudacityProject& mProject;
 
-   std::weak_ptr<SampleTrack> mCurrentTrack;
-
-   Observer::Subscription mTrackListChanged;
    Observer::Subscription mUndoSubscription;
 
    std::string mServerID;
@@ -183,21 +199,18 @@ class VirtualStudioPanel : public wxPanel
    std::string mServerSessionID;
    std::string mServerOwnerID;
    std::string mServerStatus;
-   int mServerBroadcast;
-   double mServerSampleRate;
-   bool mServerEnabled;
+   int mServerBroadcast = 0;
+   double mServerSampleRate = 0;
+   bool mServerEnabled = 0;
 
-   WSSClient* mServerClient;
-   boost::thread mServerThread;
-
-   WSSClient* mSubscriptionsClient;
-   boost::thread mSubscriptionsThread;
-
-   WSSClient* mDevicesClient;
-   boost::thread mDevicesThread;
-
-   WSSClient* mMetersClient;
-   boost::thread mMetersThread;
+   std::shared_ptr<WSSClient> mServerClient{nullptr};
+   std::shared_ptr<boost::thread> mServerThread{nullptr};
+   std::shared_ptr<WSSClient> mSubscriptionsClient{nullptr};
+   std::shared_ptr<boost::thread> mSubscriptionsThread{nullptr};
+   std::shared_ptr<WSSClient> mDevicesClient{nullptr};
+   std::shared_ptr<boost::thread> mDevicesThread{nullptr};
+   std::shared_ptr<WSSClient> mMetersClient{nullptr};
+   std::shared_ptr<boost::thread> mMetersThread{nullptr};
 
    StudioParticipantMap* mSubscriptionsMap{nullptr};
    std::map<std::string, std::string> mDeviceToOwnerMap;
@@ -256,8 +269,9 @@ private:
    void OnMeterWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg);
    void OnWssOpen(ConnectionHdl hdl);
    static websocketpp::lib::shared_ptr<SslContext> OnTlsInit();
-   void DisableLogging(WSSClient& client);
-   void SetUrl(WSSClient& client, std::string url);
+   void DisableLogging(const std::shared_ptr<WSSClient>& client);
+   void Connect(const std::shared_ptr<WSSClient>& client, std::string url);
+   void Disconnect(std::shared_ptr<WSSClient>& client, std::shared_ptr<boost::thread>& thread);
    void InitializeWebsockets();
    void StopWebsockets();
    void InitServerWebsocket();

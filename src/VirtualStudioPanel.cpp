@@ -44,6 +44,7 @@
 #include "UndoManager.h"
 #include "Prefs.h"
 #include "BasicUI.h"
+#include "wxPanelWrapper.h"
 #include "ListNavigationEnabled.h"
 #include "ListNavigationPanel.h"
 #include "MovableControl.h"
@@ -54,6 +55,8 @@
 #if wxUSE_ACCESSIBILITY
 #include "WindowAccessible.h"
 #endif
+
+const static int gap = 2;
 
 namespace
 {
@@ -302,12 +305,485 @@ namespace
       virtual std::optional<wxString> PickEffect(wxWindow* parent, const wxString& selectedEffectID) = 0;
    };
 
+   class ParticipantBars
+      : public wxPanelWrapper
+      , public NonInterferingBase
+   {
+      AudacityProject *mProject;
+      int mWidth;
+      int mHeight;
+      bool mClip;
+      bool mGradient;
+      bool mDB;
+      int mDBRange;
+      int mNumPeakSamplesToClip;
+      double mPeakHoldDuration;
+
+      unsigned mNumBars;
+      VSMeterBar mBar[kMaxVSMeterBars]{};
+      std::unique_ptr<wxBitmap> mBitmap;
+      wxBrush mBkgndBrush;
+      wxPen     mPeakPeakPen;
+      wxBrush   mClipBrush;
+
+   public:
+      ParticipantBars(AudacityProject *project,
+            wxWindow* parent,
+            wxWindowID winid,
+            const wxPoint& pos = wxDefaultPosition,
+            const wxSize& size = wxDefaultSize,
+            float fDecayRate = 60.0f):
+         wxPanelWrapper(parent, winid, pos, size),
+         mProject(project),
+         mWidth(size.x),
+         mHeight(size.y),
+         mGradient(true),
+         mDB(true),
+         mNumPeakSamplesToClip(3),
+         mPeakHoldDuration(3),
+         mDBRange(DecibelScaleCutoff.Read()),
+         mClip(true)
+      {
+         Bind(wxEVT_PAINT, &ParticipantBars::OnPaint, this);
+         Bind(wxEVT_SIZE, &ParticipantBars::OnSize, this);
+      }
+
+      ~ParticipantBars() {}
+
+      static float ClipZeroToOne(float z) {
+         if (z > 1.0)
+            return 1.0;
+         else if (z < 0.0)
+            return 0.0;
+         else
+            return z;
+      }
+
+      static float ToDB(float v, float range) {
+         double db;
+         if (v > 0)
+            db = LINEAR_TO_DB(fabs(v));
+         else
+            db = -999;
+         return ClipZeroToOne((db + range) / range);
+      }
+
+      void UpdateDisplay(int numFrames, float left, float right) {
+         for(unsigned int j=0; j<mNumBars; j++) {
+            mBar[j].isclipping = false;
+
+            auto val = right;
+            if (j == 0) {
+               val = left;
+            }
+
+            //
+            if (mDB) {
+               val = ToDB(val, mDBRange);
+            }
+
+            mBar[j].peak = val;
+
+            // This smooths out the RMS signal
+            float smooth = pow(0.9, (double)numFrames/1024.0);
+            mBar[j].rms = mBar[j].rms * smooth + val * (1.0 - smooth);
+
+            /*
+            if (mT - mBar[j].peakHoldTime > mPeakHoldDuration || mBar[j].peak > mBar[j].peakHold) {
+               mBar[j].peakHold = mBar[j].peak;
+               mBar[j].peakHoldTime = mT;
+            }
+            */
+
+            if (mBar[j].peak > mBar[j].peakPeakHold )
+               mBar[j].peakPeakHold = mBar[j].peak;
+
+            /*
+            if (msg.clipping[j] || mBar[j].tailPeakCount+msg.headPeakCount[j] >= mNumPeakSamplesToClip) {
+               mBar[j].clipping = true;
+               mBar[j].isclipping = true;
+            }
+            mBar[j].tailPeakCount = msg.tailPeakCount[j];
+            */
+         }
+
+         RepaintBarsNow();
+      }
+
+   private:
+
+      void DrawMeterBar(wxDC &dc, VSMeterBar *bar)
+      {
+         // Cache some metrics
+         wxCoord x = bar->r.GetLeft();
+         wxCoord y = bar->r.GetTop();
+         wxCoord w = bar->r.GetWidth();
+         wxCoord h = bar->r.GetHeight();
+         wxCoord ht;
+         wxCoord wd;
+
+         // Setup for erasing the background
+         dc.SetPen(*wxTRANSPARENT_PEN);
+         dc.SetBrush(mBkgndBrush);
+
+         // Map the predrawn bitmap into the source DC
+         wxMemoryDC srcDC;
+         srcDC.SelectObject(*mBitmap);
+
+         if (bar->vert)
+         {
+            // Copy as much of the predrawn meter bar as is required for the
+            // current peak.
+            // (h - 1) corresponds to the mRuler.SetBounds() in HandleLayout()
+            ht = (int)(bar->peak * (h - 1) + 0.5);
+
+            // Blank out the rest
+            if (h - ht)
+            {
+               // ht includes peak value...not really needed but doesn't hurt
+               dc.DrawRectangle(x, y, w, h - ht);
+            }
+
+            // Copy as much of the predrawn meter bar as is required for the
+            // current peak.
+            // +/-1 to include the peak position
+            if (ht)
+            {
+               dc.Blit(x, y + h - ht - 1, w, ht + 1, &srcDC, x, y + h - ht - 1);
+            }
+
+            // Draw the "recent" peak hold line using the predrawn meter bar so that
+            // it will be the same color as the original level.
+            // (h - 1) corresponds to the mRuler.SetBounds() in HandleLayout()
+            ht = (int)(bar->peakHold * (h - 1) + 0.5);
+            if (ht > 1)
+            {
+               dc.Blit(x, y + h - ht - 1, w, 2, &srcDC, x, y + h - ht - 1);
+            }
+
+            // Draw the "maximum" peak hold line
+            // (h - 1) corresponds to the mRuler.SetBounds() in HandleLayout()
+            dc.SetPen(mPeakPeakPen);
+            ht = (int)(bar->peakPeakHold * (h - 1) + 0.5);
+            if (ht > 0)
+            {
+               AColor::Line(dc, x, y + h - ht - 1, x + w - 1, y + h - ht - 1);
+               if (ht > 1)
+               {
+                  AColor::Line(dc, x, y + h - ht, x + w - 1, y + h - ht);
+               }
+            }
+         }
+
+         // No longer need the source DC, so unselect the predrawn bitmap
+         srcDC.SelectObject(wxNullBitmap);
+
+         // If meter had a clipping indicator, draw or erase it
+         // LLL:  At least I assume that's what "mClip" is supposed to be for as
+         //       it is always "true".
+         if (mClip)
+         {
+            if (bar->clipping)
+            {
+               dc.SetBrush(mClipBrush);
+            }
+            else
+            {
+               dc.SetBrush(mBkgndBrush);
+            }
+            dc.SetPen(*wxTRANSPARENT_PEN);
+            wxRect r(bar->rClip.GetX() + 1,
+                     bar->rClip.GetY() + 1,
+                     bar->rClip.GetWidth() - 1,
+                     bar->rClip.GetHeight() - 1);
+            dc.DrawRectangle(r);
+         }
+      }
+
+      void ResetBar(VSMeterBar *b, bool resetClipping) {
+         b->peak = 0.0;
+         b->rms = 0.0;
+         b->peakHold = 0.0;
+         b->peakHoldTime = 0.0;
+         if (resetClipping)
+         {
+            b->clipping = false;
+            b->peakPeakHold = 0.0;
+         }
+         b->isclipping = false;
+         b->tailPeakCount = 0;
+      }
+
+      void RepaintBarsNow() {
+         // Invalidate the bars so they get redrawn
+         for (unsigned int i = 0; i < mNumBars; i++)
+         {
+            Refresh(false);
+         }
+         // Immediate redraw (using wxPaintDC)
+         Update();
+         return;
+      }
+
+      void SetBarAndClip(int iBar, bool vert) {
+         // Save the orientation
+         mBar[iBar].vert = vert;
+
+         // Create the bar rectangle and educe to fit inside the bevel
+         mBar[iBar].r = mBar[iBar].b;
+         mBar[iBar].r.x += 1;
+         mBar[iBar].r.width -= 1;
+         mBar[iBar].r.y += 1;
+         mBar[iBar].r.height -= 1;
+
+         if (vert)
+         {
+            if (mClip)
+            {
+               // Create the clip rectangle
+               mBar[iBar].rClip = mBar[iBar].b;
+               mBar[iBar].rClip.height = 3;
+
+               // Make room for the clipping indicator
+               mBar[iBar].b.y += 3 + gap;
+               mBar[iBar].b.height -= 3 + gap;
+               mBar[iBar].r.y += 3 + gap;
+               mBar[iBar].r.height -= 3 + gap;
+            }
+         }
+         else
+         {
+            if (mClip)
+            {
+               // Make room for the clipping indicator
+               mBar[iBar].b.width -= 4;
+               mBar[iBar].r.width -= 4;
+
+               // Create the indicator rectangle
+               mBar[iBar].rClip = mBar[iBar].b;
+               mBar[iBar].rClip.x = mBar[iBar].b.GetRight() + 1 + gap; // +1 for bevel
+               mBar[iBar].rClip.width = 3;
+            }
+         }
+      }
+
+      void HandleLayout(wxDC &dc) {
+         dc.SetFont(GetFont());
+         int width = mWidth;
+         int height = mHeight;
+         int left = 0;
+         int top = 0;
+         int barw;
+         int barh;
+         int lside;
+         int rside;
+
+         // height is now the entire height of the meter canvas
+         height -= top + gap;
+
+         // barw is half of the canvas while allowing for a gap between meters
+         barw = (width - gap) / 2;
+
+         // barh is now the height of the canvas
+         barh = height;
+
+         // We always have 2 bars
+         mNumBars = 2;
+
+         // Save dimensions of the left bevel
+         mBar[0].b = wxRect(left, top, barw, barh);
+
+         // Save dimensions of the right bevel
+         mBar[1].b = mBar[0].b;
+         mBar[1].b.SetLeft(mBar[0].b.GetRight() + 1 + gap); // +1 for right edge
+
+         // Set bar and clipping indicator dimensions
+         SetBarAndClip(0, true);
+         SetBarAndClip(1, true);
+      }
+
+      //
+      // Event handlers
+      //
+      void OnPaint(wxPaintEvent &evt) {
+#if defined(__WXMAC__)
+         auto paintDC = std::make_unique<wxPaintDC>(this);
+#else
+         std::unique_ptr<wxDC> paintDC{ wxAutoBufferedPaintDCFactory(this) };
+#endif
+         wxDC & destDC = *paintDC;
+         wxColour clrText = theTheme.Colour( clrTrackPanelText );
+         wxColour clrBoxFill = theTheme.Colour( clrMedium );
+
+         if (true)
+         {
+            // Create a NEW one using current size and select into the DC
+            mBitmap = std::make_unique<wxBitmap>();
+            mBitmap->Create(mWidth, mHeight, destDC);
+            wxMemoryDC dc;
+            dc.SelectObject(*mBitmap);
+
+            // Go calculate all of the layout metrics
+            HandleLayout(dc);
+
+            // Start with a clean background
+            // LLL:  Should research USE_AQUA_THEME usefulness...
+      //#ifndef USE_AQUA_THEME
+#ifdef EXPERIMENTAL_THEMING
+            //if( !mMeterDisabled )
+            //{
+            //   mBkgndBrush.SetColour( GetParent()->GetBackgroundColour() );
+            //}
+#endif
+            mBkgndBrush.SetColour( GetBackgroundColour() );
+            dc.SetPen(*wxTRANSPARENT_PEN);
+            dc.SetBrush(mBkgndBrush);
+            dc.DrawRectangle(0, 0, mWidth, mHeight);
+      //#endif
+
+            // Setup the colors for the 3 sections of the meter bars
+            wxColor green(117, 215, 112);
+            wxColor yellow(255, 255, 0);
+            wxColor red(255, 0, 0);
+
+            // Bug #2473 - (Sort of) Hack to make text on meters more
+            // visible with darker backgrounds. It would be better to have
+            // different colors entirely and as part of the theme.
+            if (GetBackgroundColour().GetLuminance() < 0.25)
+            {
+               green = wxColor(117-100, 215-100, 112-100);
+               yellow = wxColor(255-100, 255-100, 0);
+               red = wxColor(255-100, 0, 0);
+            }
+            else if (GetBackgroundColour().GetLuminance() < 0.50)
+            {
+               green = wxColor(117-50, 215-50, 112-50);
+               yellow = wxColor(255-50, 255-50, 0);
+               red = wxColor(255-50, 0, 0);
+            }
+
+            // Draw the meter bars at maximum levels
+            for (unsigned int i = 0; i < mNumBars; i++)
+            {
+               // Give it a recessed look
+               AColor::Bevel(dc, false, mBar[i].b);
+
+               // Draw the clip indicator bevel
+               if (mClip)
+               {
+                  AColor::Bevel(dc, false, mBar[i].rClip);
+               }
+
+               // Cache bar rect
+               wxRect r = mBar[i].r;
+
+               if (mGradient)
+               {
+                  // Calculate the size of the two gradiant segments of the meter
+                  double gradw;
+                  double gradh;
+                  if (mDB)
+                  {
+                     gradw = (double) r.GetWidth() / mDBRange * 6.0;
+                     gradh = (double) r.GetHeight() / mDBRange * 6.0;
+                  }
+                  else
+                  {
+                     gradw = (double) r.GetWidth() / 100 * 25;
+                     gradh = (double) r.GetHeight() / 100 * 25;
+                  }
+
+                  if (mBar[i].vert)
+                  {
+                     // Draw the "critical" segment (starts at top of meter and works down)
+                     r.SetHeight(gradh);
+                     dc.GradientFillLinear(r, red, yellow, wxSOUTH);
+
+                     // Draw the "warning" segment
+                     r.SetTop(r.GetBottom());
+                     dc.GradientFillLinear(r, yellow, green, wxSOUTH);
+
+                     // Draw the "safe" segment
+                     r.SetTop(r.GetBottom());
+                     r.SetBottom(mBar[i].r.GetBottom());
+                     dc.SetPen(*wxTRANSPARENT_PEN);
+                     dc.SetBrush(green);
+                     dc.DrawRectangle(r);
+                  }
+                  else
+                  {
+                     // Draw the "safe" segment
+                     r.SetWidth(r.GetWidth() - (int) (gradw + gradw + 0.5));
+                     dc.SetPen(*wxTRANSPARENT_PEN);
+                     dc.SetBrush(green);
+                     dc.DrawRectangle(r);
+
+                     // Draw the "warning"  segment
+                     r.SetLeft(r.GetRight() + 1);
+                     r.SetWidth(floor(gradw));
+                     dc.GradientFillLinear(r, green, yellow);
+
+                     // Draw the "critical" segment
+                     r.SetLeft(r.GetRight() + 1);
+                     r.SetRight(mBar[i].r.GetRight());
+                     dc.GradientFillLinear(r, yellow, red);
+                  }
+#ifdef EXPERIMENTAL_METER_LED_STYLE
+                  if (!mBar[i].vert)
+                  {
+                     wxRect r = mBar[i].r;
+                     wxPen BackgroundPen;
+                     BackgroundPen.SetColour( wxSystemSettings::GetColour(wxSYS_COLOUR_3DFACE) );
+                     dc.SetPen( BackgroundPen );
+                     int i;
+                     for(i=0;i<r.width;i++)
+                     {
+                        // 2 pixel spacing between the LEDs
+                        if( (i%7)<2 ){
+                           AColor::Line( dc, i+r.x, r.y, i+r.x, r.y+r.height );
+                        } else {
+                           // The LEDs have triangular ends.
+                           // This code shapes the ends.
+                           int j = abs( (i%7)-4);
+                           AColor::Line( dc, i+r.x, r.y, i+r.x, r.y+j +1);
+                           AColor::Line( dc, i+r.x, r.y+r.height-j, i+r.x, r.y+r.height );
+                        }
+                     }
+                  }
+#endif
+               }
+            }
+            dc.SetTextForeground( clrText );
+
+            // Bitmap created...unselect
+            dc.SelectObject(wxNullBitmap);
+         }
+
+         // Copy predrawn bitmap to the dest DC
+         destDC.DrawBitmap(*mBitmap, 0, 0);
+
+         // Go draw the meter bars, Left & Right channels using current levels
+         for (unsigned int i = 0; i < mNumBars; i++)
+         {
+            DrawMeterBar(destDC, &mBar[i]);
+         }
+
+         destDC.SetTextForeground( clrText );
+      }
+
+      void OnSize(wxSizeEvent &evt) {
+         GetClientSize(&mWidth, &mHeight);
+         //Refresh();
+      }
+
+   };
+
    //UI control that represents individual effect from the effect list
    class ParticipantControl : public ListNavigationEnabled<MovableControl>
    {
       wxWeakRef<AudacityProject> mProject;
       std::shared_ptr<StudioParticipant> mParticipant;
-      double mSampleRate;
+
       std::shared_ptr<EffectSettingsAccess> mSettingsAccess;
 
       RealtimeEffectPicker* mEffectPicker { nullptr };
@@ -315,8 +791,8 @@ namespace
       ThemedAButtonWrapper<AButton>* mChangeButton{nullptr};
       AButton* mEnableButton{nullptr};
       ThemedAButtonWrapper<AButton>* mOptionsButton{};
-      wxStaticText* mParticipantName {nullptr};
-      MeterPanel *mMeter{nullptr};
+      wxStaticText* mParticipantName{nullptr};
+      ParticipantBars *mMeter{nullptr};
 
       Observer::Subscription mParticipantSubscription;
 
@@ -344,7 +820,6 @@ namespace
          MovableControl::SetBackgroundStyle(wxBG_STYLE_PAINT);
          MovableControl::Create(parent, winid, pos, size, wxNO_BORDER | wxWANTS_CHARS);
 
-         Bind(wxEVT_PAINT, &ParticipantControl::OnPaint, this);
          Bind(wxEVT_SET_FOCUS, &ParticipantControl::OnFocusChange, this);
          Bind(wxEVT_KILL_FOCUS, &ParticipantControl::OnFocusChange, this);
 
@@ -397,8 +872,7 @@ namespace
          // changeButton->SetTranslatableLabel(XO("Replace effect"));
          // changeButton->Bind(wxEVT_BUTTON, &ParticipantControl::OnChangeButtonClicked, this);
 
-         auto meter = safenew MeterPanel( mProject, this, wxID_ANY, false, wxDefaultPosition, wxSize( 20, 56 ), MeterPanel::Style::JackTripCompact, 0.1 );
-         meter->Reset(48000, true);
+         auto meter = safenew ParticipantBars( mProject, this, wxID_ANY, wxDefaultPosition, wxSize( 20, 56 ) );
          mMeter = meter;
          /*
          auto dragArea = safenew wxStaticBitmap(this, wxID_ANY, theTheme.Bitmap(bmpDragArea));
@@ -412,7 +886,6 @@ namespace
          sizer->Add(meter, 0, wxLEFT | wxRIGHT | wxTOP | wxBOTTOM | wxCENTER, 0);
          //mChangeButton = changeButton;
          //mOptionsButton = optionsButton;
-         mMeter = meter;
 
          auto vSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
          vSizer->Add(sizer.release(), 0, wxUP | wxDOWN | wxEXPAND, 4);
@@ -429,37 +902,20 @@ namespace
          return desc;
       }
 
-      std::string GetEffectName() const
-      {
-         return mParticipant->GetName();
-         /*
-         const auto &ID = mEffectState->GetID();
-         const auto desc = GetPlugin(ID);
-         return desc
-            ? desc->GetSymbol().Msgid()
-            : XO("%s (missing)")
-               .Format(PluginManager::GetEffectNameFromID(ID).GET());
-         */
-      }
-
       void SetParticipant(AudacityProject& project,
-         const std::shared_ptr<StudioParticipant>& participant, double sampleRate)
+         const std::shared_ptr<StudioParticipant>& participant)
       {
          mProject = &project;
          mParticipant = participant;
-         mSampleRate = sampleRate;
-         mMeter->Reset(sampleRate, true);
 
          mParticipantSubscription = mParticipant->Subscribe([this](const ParticipantEvent& evt) {
             switch (evt.mType)
             {
             case ParticipantEvent::VOLUME_CHANGE:
                if (mMeter) {
-                  float *numbers = new float[2];
-                  numbers[0] = mParticipant->GetLeftVolume();
-                  numbers[1] = mParticipant->GetRightVolume();
-                  std::cout << "hello " << numbers[0] << numbers[1] << std::endl;
-                  mMeter->UpdateDisplay(2, 1, numbers);
+                  //std::cout << "hello " << numbers[0] << numbers[1] << std::endl;
+                  //mMeter->UpdateDisplay(2, 1, numbers);
+                  mMeter->UpdateDisplay(1, mParticipant->GetLeftVolume(), mParticipant->GetRightVolume());
                }
                break;
             /*
@@ -485,11 +941,10 @@ namespace
             }
          });
 
-         std::string label;
          if (mParticipant != nullptr) {
-            label = GetEffectName();
+            auto name = mParticipant->GetName();
             if (mParticipantName) {
-               mParticipantName->SetLabel(label);
+               mParticipantName->SetLabel(name);
             }
             /*
             if (mParticipant->IsHidden()) {
@@ -506,7 +961,7 @@ namespace
       void RemoveFromList()
       {
          std::cout << "RemoveFromList" << std::endl;
-         if (mProject == nullptr || mSampleRate == 0 || mParticipant == nullptr) {
+         if (mProject == nullptr || mParticipant == nullptr) {
             return;
          }
 
@@ -538,7 +993,7 @@ namespace
       void OnOptionsClicked(wxCommandEvent& event)
       {
          std::cout << "OnOptionsClicked" << std::endl;
-         if (mProject == nullptr || mSampleRate == 0 || mParticipant == nullptr) {
+         if (mProject == nullptr || mParticipant == nullptr) {
             return;
          }
 
@@ -562,7 +1017,7 @@ namespace
       void OnChangeButtonClicked(wxCommandEvent& event)
       {
          std::cout << "OnChangeButtonClicked" << std::endl;
-         if (mProject == nullptr || mSampleRate == 0 || mParticipant == nullptr) {
+         if (mProject == nullptr || mParticipant == nullptr) {
             return;
          }
 
@@ -608,23 +1063,6 @@ namespace
          // }
       }
 
-      void OnPaint(wxPaintEvent&)
-      {
-         wxBufferedPaintDC dc(this);
-         const auto rect = wxRect(GetSize());
-
-         dc.SetPen(*wxTRANSPARENT_PEN);
-         dc.SetBrush(GetBackgroundColour());
-         dc.DrawRectangle(rect);
-
-         dc.SetPen(theTheme.Colour(clrEffectListItemBorder));
-         dc.SetBrush(theTheme.Colour(clrEffectListItemBorder));
-         dc.DrawLine(rect.GetBottomLeft(), rect.GetBottomRight());
-
-         if(HasFocus())
-            AColor::DrawFocus(dc, GetClientRect().Deflate(3, 3));
-      }
-
       void OnFocusChange(wxFocusEvent& evt)
       {
          Refresh(false);
@@ -647,7 +1085,6 @@ class VirtualStudioParticipantListWindow
    , public PrefsListener
 {
    wxWeakRef<AudacityProject> mProject;
-   double mSampleRate;
    std::string mServerID;
    std::shared_ptr<SampleTrack> mTrack;
    AButton* mAddEffect{nullptr};
@@ -658,7 +1095,6 @@ class VirtualStudioParticipantListWindow
 
    std::unique_ptr<MenuTable::MenuItem> mEffectMenuRoot;
 
-   Observer::Subscription mEffectListItemMovedSubscription;
    Observer::Subscription mParticipantChangeSubscription;
 
 public:
@@ -806,7 +1242,7 @@ public:
       {
          dropHintLine->Hide();
 
-         if(mProject == nullptr || mSampleRate == 0)
+         if(mProject == nullptr)
             return;
 
          // auto& effectList = RealtimeEffectList::Get(*mTrack);
@@ -1014,25 +1450,19 @@ public:
 
    void Reset()
    {
-      mParticipantChangeSubscription.Reset();
       mProject = nullptr;
-      mSampleRate = 0;
       mServerID = "";
       ReloadEffectsList();
       /*
-      mEffectListItemMovedSubscription.Reset();
-
       mTrack.reset();
       mProject = nullptr;
       ReloadEffectsList();
       */
    }
 
-   void SetProject(AudacityProject& project, std::string serverID, double sampleRate)
+   void SetProject(AudacityProject& project, std::string serverID)
    {
-      mEffectListItemMovedSubscription.Reset();
       mProject = &project;
-      mSampleRate = sampleRate;
       mServerID = serverID;
       ReloadEffectsList();
 
@@ -1040,16 +1470,6 @@ public:
          auto link = dynamic_cast<wxHyperlinkCtrl*>(mStudioLink);
          link->SetURL(kApiBaseUrl + "/studios/" + serverID);
       }
-      /*
-      if (track)
-      {
-         auto& effects = RealtimeEffectList::Get(*mTrack);
-         mEffectListItemMovedSubscription = effects.Subscribe(
-            *this, &VirtualStudioParticipantListWindow::OnEffectListItemChange);
-
-         UpdateRealtimeEffectUIData(*track);
-      }
-      */
    }
 
    void EnableEffects(bool enable)
@@ -1146,7 +1566,7 @@ public:
 
    void InsertParticipantRow(size_t index, const std::shared_ptr<StudioParticipant> p)
    {
-      if (mProject == nullptr || mSampleRate == 0 || mServerID.empty()) {
+      if (mProject == nullptr || mServerID.empty()) {
          return;
       }
 
@@ -1156,7 +1576,7 @@ public:
 
       auto row = safenew ThemedWindowWrapper<ParticipantControl>(mParticipantListContainer, this, wxID_ANY);
       row->SetBackgroundColorIndex(clrEffectListItemBackground);
-      row->SetParticipant(*mProject, p, mSampleRate);
+      row->SetParticipant(*mProject, p);
       mParticipantListContainer->GetSizer()->Insert(index, row, 0, wxEXPAND);
    }
 };
@@ -1205,18 +1625,13 @@ StudioParticipant::StudioParticipant(wxWindow* parent, std::string id, std::stri
    mRightVolume = 0;
    mShown = false;
 
+   /*
    if (!picture.empty()) {
       if (!mImage.LoadFile(picture, wxBITMAP_TYPE_JPEG)) {
          std::cout << "failed to load file: " << picture << std::endl;
       }
    }
-/*
-if (!hImage.LoadFile(wxT("horse.jpg"), wxBITMAP_TYPE_JPEG,))
-{
-	wxLogError(wxT("Can't load JPG image"));
-}
-*/
-
+   */
 }
 
 StudioParticipant::~StudioParticipant()
@@ -1325,6 +1740,11 @@ void StudioParticipantMap::UpdateParticipantVolume(std::string id, float left, f
 unsigned long StudioParticipantMap::GetParticipantsCount()
 {
    return mMap.size();
+}
+
+void StudioParticipantMap::Clear()
+{
+   mMap.clear();
 }
 
 void StudioParticipantMap::QueueEvent(ParticipantEvent event)
@@ -1458,34 +1878,6 @@ VirtualStudioPanel::VirtualStudioPanel(
    SetSizerAndFit(vSizer.release());
 
    Bind(wxEVT_CHAR_HOOK, &VirtualStudioPanel::OnCharHook, this);
-   mTrackListChanged = TrackList::Get(mProject).Subscribe([this](const TrackListEvent& evt) {
-         auto track = evt.mpTrack.lock();
-         auto waveTrack = std::dynamic_pointer_cast<WaveTrack>(track);
-
-         if (waveTrack == nullptr)
-            return;
-
-         switch (evt.mType)
-         {
-         case TrackListEvent::TRACK_DATA_CHANGE:
-            if (mCurrentTrack.lock() == waveTrack)
-               mStudioTitle->SetLabel(track->GetName());
-            UpdateRealtimeEffectUIData(*waveTrack);
-            break;
-         case TrackListEvent::DELETION:
-            if (evt.mExtra == 0)
-               mPotentiallyRemovedTracks.push_back(waveTrack);
-            break;
-         case TrackListEvent::ADDITION:
-            // Addition can be fired as a part of "replace" event.
-            // Calling UpdateRealtimeEffectUIData is mostly no-op,
-            // it will just create a new State and Access for it.
-            UpdateRealtimeEffectUIData(*waveTrack);
-            break;
-         default:
-            break;
-         }
-   });
 
    mUndoSubscription = UndoManager::Get(mProject).Subscribe(
       [this](UndoRedoMessage message)
@@ -1567,6 +1959,7 @@ VirtualStudioPanel::VirtualStudioPanel(
 
 VirtualStudioPanel::~VirtualStudioPanel()
 {
+   ResetStudio();
 }
 
 void VirtualStudioPanel::UpdateServerName(std::string name)
@@ -1576,8 +1969,7 @@ void VirtualStudioPanel::UpdateServerName(std::string name)
    }
    mServerName = name;
    mStudioTitle->SetLabel(name);
-   mHeader->SetName(wxString::Format(_("Realtime effects for %s"), name));
-   std::cout << mServerName << std::endl;
+   mHeader->SetName(wxString::Format(_("JackTrip Virtual Studio: %s"), name));
 }
 
 void VirtualStudioPanel::UpdateServerStatus(std::string status)
@@ -1592,7 +1984,6 @@ void VirtualStudioPanel::UpdateServerStatus(std::string status)
    } else {
       StopMetersWebsocket();
    }
-   std::cout << mServerStatus << std::endl;
 }
 
 void VirtualStudioPanel::UpdateServerBanner(std::string banner)
@@ -1601,7 +1992,6 @@ void VirtualStudioPanel::UpdateServerBanner(std::string banner)
       return;
    }
    mServerBanner = banner;
-   std::cout << mServerBanner << std::endl;
 }
 
 void VirtualStudioPanel::UpdateServerSessionID(std::string sessionID)
@@ -1638,7 +2028,6 @@ void VirtualStudioPanel::UpdateServerEnabled(bool enabled) {
    } else {
       mStudioOnline->PopUp();
    }
-   std::cout << mServerEnabled << std::endl;
 }
 
 void VirtualStudioPanel::UpdateServerSampleRate(double sampleRate) {
@@ -1657,14 +2046,16 @@ void VirtualStudioPanel::UpdateServerBroadcast(int broadcast) {
 
 void VirtualStudioPanel::ShowPanel(std::string serverID, std::string accessToken, bool focus)
 {
-   if(serverID.empty() || accessToken.empty())
-   {
+   if (serverID.empty() || accessToken.empty()) {
       ResetStudio();
       return;
    }
 
    wxWindowUpdateLocker freeze(this);
-   SetStudio(serverID, accessToken);
+
+   mServerID = serverID;
+   mAccessToken = accessToken;
+   SetStudio(mServerID, mAccessToken);
 
    auto &projectWindow = ProjectWindow::Get(mProject);
    const auto pContainerWindow = projectWindow.GetContainerWindow();
@@ -1714,7 +2105,11 @@ void VirtualStudioPanel::OnServerWssMessage(ConnectionHdl hdl, websocketpp::conf
 
    UpdateServerName(document["name"].GetString());
    UpdateServerStatus(document["status"].GetString());
-   UpdateServerBanner(document["bannerURL"].GetString());
+   std::string banner;
+   if (document.HasMember("bannerURL")) {
+      banner = document["bannerURL"].GetString();
+   }
+   UpdateServerBanner(banner);
    UpdateServerSessionID(document["sessionId"].GetString());
    UpdateServerOwnerID(document["ownerId"].GetString());
    UpdateServerSampleRate(document["sampleRate"].GetDouble());
@@ -1800,15 +2195,10 @@ void VirtualStudioPanel::OnMeterWssMessage(ConnectionHdl hdl, websocketpp::confi
             auto dbVals = musicians[idx].GetArray();
             auto leftDbVal = dbVals[0].GetDouble();
             auto rightDbVal = dbVals[1].GetDouble();
-            //std::cout << "Device " << device << " owned by " << ownerID << " with left val " << leftDbVal << " and right val " << rightDbVal << std::endl;
-
-            if (auto participant = mSubscriptionsMap->GetParticipantByID(ownerID)) {
-               float left = powf(10.0, leftDbVal/20.0);
-               float right = powf(10.0, rightDbVal/20.0);
-               participant->UpdateVolume(left, right);
-               //participant->SetShown(true);
-            }
-
+            float left = powf(10.0, leftDbVal/20.0);
+            float right = powf(10.0, rightDbVal/20.0);
+            mSubscriptionsMap->UpdateParticipantVolume(ownerID, left, right);
+            //participant->SetShown(true);
          }
          idx++;
       }
@@ -1837,22 +2227,35 @@ websocketpp::lib::shared_ptr<SslContext> VirtualStudioPanel::OnTlsInit()
    return ctx;
 };
 
-void VirtualStudioPanel::DisableLogging(WSSClient& client)
+void VirtualStudioPanel::DisableLogging(const std::shared_ptr<WSSClient>& client)
 {
-   client.clear_access_channels(websocketpp::log::alevel::all);
-   client.clear_error_channels(websocketpp::log::elevel::all);
+   client->clear_access_channels(websocketpp::log::alevel::all);
+   client->clear_error_channels(websocketpp::log::elevel::all);
 }
 
-void VirtualStudioPanel::SetUrl(WSSClient& client, std::string url)
+void VirtualStudioPanel::Connect(const std::shared_ptr<WSSClient>& client, std::string url)
 {
    websocketpp::lib::error_code ec;
-   auto connection = client.get_connection(url, ec);
+   auto connection = client->get_connection(url, ec);
    if (ec) {
       std::cout << "error " << ec << std::endl;
       return;
    }
    connection->append_header("Origin", "https://app.jacktrip.org");
-   client.connect(connection);
+   client->connect(connection);
+}
+
+void VirtualStudioPanel::Disconnect(std::shared_ptr<WSSClient>& client, std::shared_ptr<boost::thread>& thread)
+{
+   if (client) {
+      client->stop();
+   }
+   if (thread) {
+      thread->interrupt();
+      thread->join();
+   }
+   thread.reset();
+   client.reset();
 }
 
 void VirtualStudioPanel::InitializeWebsockets()
@@ -1865,158 +2268,143 @@ void VirtualStudioPanel::InitializeWebsockets()
 void VirtualStudioPanel::StopWebsockets()
 {
    StopMetersWebsocket();
-   mDevicesThread.interrupt();
-   mDevicesThread.join();
-   mSubscriptionsThread.interrupt();
-   mSubscriptionsThread.join();
-   mServerThread.interrupt();
-   mServerThread.join();
+   Disconnect(mServerClient, mServerThread);
+   Disconnect(mSubscriptionsClient, mSubscriptionsThread);
+   Disconnect(mDevicesClient, mDevicesThread);
 }
 
 void VirtualStudioPanel::InitServerWebsocket()
 {
-   mServerThread = boost::thread([&]
-   {
-      WSSClient client;
-      DisableLogging(client);
-      client.init_asio();
-      client.set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
-      client.set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
-      client.set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnServerWssMessage, this, ::_1, ::_2));
-      std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "?auth_code=" + mAccessToken;
-      //std::cout << "URL is: " << url << std::endl;
-      SetUrl(client, url);
-      mServerClient = &client;
+   if (mServerClient || mServerThread) {
+      return;
+   }
+   mServerClient.reset(new WSSClient);
+   mServerThread.reset(new boost::thread([&]
+      {
+         DisableLogging(mServerClient);
+         mServerClient->init_asio();
+         mServerClient->start_perpetual();
+         mServerClient->set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
+         mServerClient->set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
+         mServerClient->set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnServerWssMessage, this, ::_1, ::_2));
+         std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "?auth_code=" + mAccessToken;
+         Connect(mServerClient, url);
 
-      try {
-         client.run();
-      } catch (websocketpp::exception const & e) {
-         std::cout << e.what() << std::endl;
-      } catch (std::exception const & e) {
-         std::cout << e.what() << std::endl;
-      } catch (...) {
-         std::cout << "other exception" << std::endl;
+         try {
+            mServerClient->run();
+         } catch (websocketpp::exception const & e) {
+            std::cout << e.what() << std::endl;
+         } catch (std::exception const & e) {
+            std::cout << e.what() << std::endl;
+         } catch (...) {
+            std::cout << "other exception" << std::endl;
+         }
       }
-   });
-
-   mServerThread.detach();
-   /* This is the way the docs suggest doing this but it didn't work for me...
-   WSSClient client;
-   turn_off_logging(client);
-   client.init_asio();
-   client.start_perpetual();
-
-   set_tls_init_handler(client);
-   set_open_handler(client);
-   set_message_handler(client);
-   std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "?auth_code=" + mAccessToken;
-   std::cout << "URL is: " << url << std::endl;
-   set_url(client, url);
-   mThread.reset(new websocketpp::lib::thread(&WSSClient::run, &client));
-   mThread->detach();
-   */
+   ));
+   mServerThread->detach();
 }
 
 void VirtualStudioPanel::InitSubscriptionsWebsocket()
 {
-   mSubscriptionsThread = boost::thread([&]
-   {
-      WSSClient client;
-      DisableLogging(client);
-      client.init_asio();
-      client.set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
-      client.set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
-      client.set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnSubscriptionWssMessage, this, ::_1, ::_2));
-      std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "/subscriptions?auth_code=" + mAccessToken;
-      //std::cout << "URL is: " << url << std::endl;
-      SetUrl(client, url);
-      mSubscriptionsClient = &client;
+   if (mSubscriptionsClient || mSubscriptionsThread) {
+      return;
+   }
+   mSubscriptionsClient.reset(new WSSClient);
+   mSubscriptionsThread.reset(new boost::thread([&]
+      {
+         DisableLogging(mSubscriptionsClient);
+         mSubscriptionsClient->init_asio();
+         mSubscriptionsClient->start_perpetual();
+         mSubscriptionsClient->set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
+         mSubscriptionsClient->set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
+         mSubscriptionsClient->set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnSubscriptionWssMessage, this, ::_1, ::_2));
+         std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "/subscriptions?auth_code=" + mAccessToken;
+         Connect(mSubscriptionsClient, url);
 
-      try {
-         client.run();
-      } catch (websocketpp::exception const & e) {
-         std::cout << e.what() << std::endl;
-      } catch (std::exception const & e) {
-         std::cout << e.what() << std::endl;
-      } catch (...) {
-         std::cout << "other exception" << std::endl;
+         try {
+            mSubscriptionsClient->run();
+         } catch (websocketpp::exception const & e) {
+            std::cout << e.what() << std::endl;
+         } catch (std::exception const & e) {
+            std::cout << e.what() << std::endl;
+         } catch (...) {
+            std::cout << "other exception" << std::endl;
+         }
       }
-   });
-
-   mSubscriptionsThread.detach();
+   ));
+   mSubscriptionsThread->detach();
 }
 
 void VirtualStudioPanel::InitDevicesWebsocket()
 {
-   mDevicesThread = boost::thread([&]
-   {
-      WSSClient client;
-      DisableLogging(client);
-      client.init_asio();
-      client.set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
-      client.set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
-      client.set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnDeviceWssMessage, this, ::_1, ::_2));
-      std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "/devices?auth_code=" + mAccessToken;
-      //std::cout << "URL is: " << url << std::endl;
-      SetUrl(client, url);
-      mDevicesClient = &client;
+   if (mDevicesClient || mDevicesThread) {
+      return;
+   }
+   mDevicesClient.reset(new WSSClient);
+   mDevicesThread.reset(new boost::thread([&]
+      {
+         DisableLogging(mDevicesClient);
+         mDevicesClient->init_asio();
+         mDevicesClient->start_perpetual();
+         mDevicesClient->set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
+         mDevicesClient->set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
+         mDevicesClient->set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnDeviceWssMessage, this, ::_1, ::_2));
+         std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "/devices?auth_code=" + mAccessToken;
+         Connect(mDevicesClient, url);
 
-      try {
-         client.run();
-      } catch (websocketpp::exception const & e) {
-         std::cout << e.what() << std::endl;
-      } catch (std::exception const & e) {
-         std::cout << e.what() << std::endl;
-      } catch (...) {
-         std::cout << "other exception" << std::endl;
+         try {
+            mDevicesClient->run();
+         } catch (websocketpp::exception const & e) {
+            std::cout << e.what() << std::endl;
+         } catch (std::exception const & e) {
+            std::cout << e.what() << std::endl;
+         } catch (...) {
+            std::cout << "other exception" << std::endl;
+         }
       }
-   });
-
-   mDevicesThread.detach();
+   ));
+   mDevicesThread->detach();
 }
 
 void VirtualStudioPanel::InitMetersWebsocket()
 {
-   std::cout << "InitMetersWebsocket" << std::endl;
-   if (mServerStatus != "Ready" || mServerSessionID.empty()) {
+   if (mServerStatus != "Ready" || mServerID.empty() || mServerSessionID.empty()) {
       return;
    }
-   std::cout << "InitMetersWebsocket done" << std::endl;
+   if (mMetersClient || mMetersThread) {
+      return;
+   }
+   mMetersClient.reset(new WSSClient);
+   mMetersThread.reset(new boost::thread([&]
+      {
+         mMetersClient.reset(new WSSClient);
+         DisableLogging(mMetersClient);
+         mMetersClient->init_asio();
+         mMetersClient->start_perpetual();
+         mMetersClient->set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
+         mMetersClient->set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
+         mMetersClient->set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnMeterWssMessage, this, ::_1, ::_2));
+         std::string secret = sha256("jktp-" + mServerID + "-" + mServerSessionID);
+         std::string url = "wss://" + mServerSessionID + ".jacktrip.cloud/meters?auth_code=" + secret;
+         Connect(mMetersClient, url);
 
-   mMetersThread = boost::thread([&]
-   {
-      WSSClient client;
-      DisableLogging(client);
-      client.init_asio();
-      client.set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
-      client.set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
-      client.set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnMeterWssMessage, this, ::_1, ::_2));
-
-      std::string secret = sha256("jktp-" + mServerID + "-" + mServerSessionID);
-      std::cout << "SHA: " << secret << std::endl;
-      std::string url = "wss://" + mServerSessionID + ".jacktrip.cloud/meters?auth_code=" + secret;
-      std::cout << "URL is: " << url << std::endl;
-      SetUrl(client, url);
-      mMetersClient = &client;
-
-      try {
-         client.run();
-      } catch (websocketpp::exception const & e) {
-         std::cout << e.what() << std::endl;
-      } catch (std::exception const & e) {
-         std::cout << e.what() << std::endl;
-      } catch (...) {
-         std::cout << "other exception" << std::endl;
+         try {
+            mMetersClient->run();
+         } catch (websocketpp::exception const & e) {
+            std::cout << e.what() << std::endl;
+         } catch (std::exception const & e) {
+            std::cout << e.what() << std::endl;
+         } catch (...) {
+            std::cout << "other exception" << std::endl;
+         }
       }
-   });
-
-   mMetersThread.detach();
+   ));
+   mMetersThread->detach();
 }
 
 void VirtualStudioPanel::StopMetersWebsocket()
 {
-   mMetersThread.interrupt();
-   mMetersThread.join();
+   Disconnect(mMetersClient, mMetersThread);
 }
 
 void VirtualStudioPanel::FetchOwner(std::string ownerID)
@@ -2051,9 +2439,11 @@ void VirtualStudioPanel::FetchOwner(std::string ownerID)
          auto userID = std::string(document["user_id"].GetString());
          auto name = std::string(document["nickname"].GetString());
          if (document["user_metadata"].IsObject()) {
-            auto displayName = std::string(document["user_metadata"]["display_name"].GetString());
-            if (!displayName.empty()) {
-               name = displayName;
+            if (document["user_metadata"].HasMember("display_name")) {
+               auto displayName = std::string(document["user_metadata"]["display_name"].GetString());
+               if (!displayName.empty()) {
+                  name = displayName;
+               }
             }
          }
          auto picture = std::string(document["picture"].GetString());
@@ -2064,10 +2454,8 @@ void VirtualStudioPanel::FetchOwner(std::string ownerID)
 
 void VirtualStudioPanel::DoClose()
 {
+   ResetStudio();
    mDeviceToOwnerMap.clear();
-   std::cout << "Stopping websocket in DoClose" << std::endl;
-   StopWebsockets();
-   std::cout << "Stopped websocket in DoClose" << std::endl;
    Close();
 }
 
@@ -2090,25 +2478,24 @@ void VirtualStudioPanel::SetStudio(std::string serverID, std::string accessToken
    if (serverID.empty() || accessToken.empty()) {
       ResetStudio();
    } else {
-      mServerID = serverID;
-      mAccessToken = accessToken;
-      mParticipantsList->SetProject(mProject, mServerID, mServerSampleRate);
       InitializeWebsockets();
+      mParticipantsList->SetProject(mProject, mServerID);
    }
 }
 
 void VirtualStudioPanel::ResetStudio()
 {
-   mServerThread.interrupt();
-   mServerThread.join();
+   std::cout << "Stopping websocket in ResetStudio" << std::endl;
+   StopWebsockets();
+   std::cout << "Stopped websocket in ResetStudio" << std::endl;
    UpdateServerName("");
    UpdateServerStatus("Disabled");
    UpdateServerEnabled(false);
    UpdateServerOwnerID("");
    UpdateServerSampleRate(0);
    UpdateServerBroadcast(0);
+   mSubscriptionsMap->Clear();
    mParticipantsList->Reset();
-   mCurrentTrack.reset();
 }
 
 void VirtualStudioPanel::SetFocus()
