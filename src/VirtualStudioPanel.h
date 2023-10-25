@@ -14,6 +14,7 @@
 #include <memory>
 
 #include <wx/image.h>
+#include <wx/bitmap.h>
 #include <wx/scrolwin.h>
 #include <wx/weakref.h>
 #include <wx/arrstr.h>
