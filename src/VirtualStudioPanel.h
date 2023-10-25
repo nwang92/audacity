@@ -79,10 +79,10 @@ struct ParticipantEvent
       VOLUME_CHANGE,
 
       // Posted when participant is hidden
-      HIDDEN,
+      HIDE,
 
       // Posted when participant is shown
-      SHOWN,
+      SHOW,
 
       // Posted when a new participant is added
       ADDITION,
@@ -132,12 +132,11 @@ public:
    std::string GetID();
    std::string GetName();
    std::string GetPicture();
-   bool IsHidden();
+   std::string GetDeviceID();
    float GetLeftVolume();
    float GetRightVolume();
    void UpdateVolume(float left, float right);
-   void SetIndex(int idx);
-   void SetShown(bool shown);
+   bool SetDeviceID(std::string deviceID);
    void QueueEvent(ParticipantEvent event);
 
 private:
@@ -145,10 +144,9 @@ private:
    std::string mID;
    std::string mName;
    std::string mPicture;
+   std::string mDeviceID;
    wxBitmap mBitmap;
    wxImage mImage;
-   bool mShown;
-   int mIndex;
    float mLeftVolume;
    float mRightVolume;
 };
@@ -164,6 +162,7 @@ public:
    std::shared_ptr<StudioParticipant> GetParticipantByID(std::string id);
    void AddParticipant(std::string id, std::string name, std::string picture);
    void UpdateParticipantVolume(std::string id, float left, float right);
+   void UpdateParticipantDevice(std::string id, std::string device);
    unsigned long GetParticipantsCount();
    void Clear();
    void QueueEvent(ParticipantEvent event);

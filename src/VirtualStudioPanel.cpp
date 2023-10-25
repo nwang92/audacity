@@ -908,18 +908,18 @@ namespace
          mProject = &project;
          mParticipant = participant;
 
+         mParticipantSubscription.Reset();
          mParticipantSubscription = mParticipant->Subscribe([this](const ParticipantEvent& evt) {
             switch (evt.mType)
             {
             case ParticipantEvent::VOLUME_CHANGE:
-               if (mMeter) {
+               if (this->IsShown() && mParticipant->GetID() == evt.mUid && mMeter) {
                   //std::cout << "hello " << numbers[0] << numbers[1] << std::endl;
                   //mMeter->UpdateDisplay(2, 1, numbers);
                   mMeter->UpdateDisplay(1, mParticipant->GetLeftVolume(), mParticipant->GetRightVolume());
                }
                break;
-            /*
-            case ParticipantEvent::SHOWN:
+            case ParticipantEvent::SHOW:
                if (mParticipant->GetID() == evt.mUid) {
                   std::cout << "Show " << mParticipant->GetName() << std::endl;
                   this->Show(true);
@@ -927,7 +927,7 @@ namespace
                   GetSizer()->Layout();
                }
                break;
-            case ParticipantEvent::HIDDEN:
+            case ParticipantEvent::HIDE:
             if (mParticipant->GetID() == evt.mUid) {
                   std::cout << "Hide " << mParticipant->GetName() << std::endl;
                   this->Show(false);
@@ -935,7 +935,6 @@ namespace
                   GetSizer()->Layout();
                }
                break;
-            */
             default:
                break;
             }
@@ -947,13 +946,8 @@ namespace
                mParticipantName->SetLabel(name);
             }
             /*
-            if (mParticipant->IsHidden()) {
-               std::cout << "Hiding " << mParticipant->GetName() << std::endl;
-               this->Show(false);
-            } else {
-               std::cout << "Showing " << mParticipant->GetName() << std::endl;
-               this->Show(true);
-            }
+            auto device = mParticipant->GetDeviceID();
+            this->Show(!device.empty());
             */
          }
       }
@@ -1499,14 +1493,14 @@ public:
          auto uid = std::string(sortedUserIDs[i].mb_str());
          auto participant = mSubscriptionsMap->GetParticipantByID(std::string(sortedUserIDs[i].mb_str()));
          if (participant) {
-            participant->SetIndex(i);
             InsertParticipantRow(i, participant);
-            isEmpty = false;
             /*
-            if (!participant->IsHidden()) {
+            auto device = participant->GetDeviceID();
+            if (!device.empty()) {
                isEmpty = false;
             }
             */
+            isEmpty = false;
          }
       }
 
@@ -1623,7 +1617,7 @@ StudioParticipant::StudioParticipant(wxWindow* parent, std::string id, std::stri
    mPicture = picture;
    mLeftVolume = 0;
    mRightVolume = 0;
-   mShown = false;
+   mDeviceID = "";
 
    /*
    if (!picture.empty()) {
@@ -1653,9 +1647,9 @@ std::string StudioParticipant::GetPicture()
    return mPicture;
 }
 
-bool StudioParticipant::IsHidden()
+std::string StudioParticipant::GetDeviceID()
 {
-   return !mShown;
+   return mDeviceID;
 }
 
 float StudioParticipant::GetLeftVolume()
@@ -1678,25 +1672,18 @@ void StudioParticipant::UpdateVolume(float left, float right)
    QueueEvent({ ParticipantEvent::VOLUME_CHANGE, mID });
 }
 
-void StudioParticipant::SetIndex(int idx)
+bool StudioParticipant::SetDeviceID(std::string deviceID)
 {
-   if (mIndex == idx) {
-      return;
+   if (mDeviceID == deviceID) {
+      return false;
    }
-   mIndex = idx;
-}
-
-void StudioParticipant::SetShown(bool shown)
-{
-   if (mShown == shown) {
-      return;
-   }
-   mShown = shown;
-   if (shown) {
-      QueueEvent({ ParticipantEvent::SHOWN, mID });
+   mDeviceID = deviceID;
+   if (deviceID.empty()) {
+      QueueEvent({ ParticipantEvent::HIDE, mID });
    } else {
-      QueueEvent({ ParticipantEvent::HIDDEN, mID });
+      QueueEvent({ ParticipantEvent::SHOW, mID });
    }
+   return true;
 }
 
 void StudioParticipant::QueueEvent(ParticipantEvent event)
@@ -1734,6 +1721,15 @@ void StudioParticipantMap::UpdateParticipantVolume(std::string id, float left, f
 {
    if (auto participant = mMap[id]) {
       participant->UpdateVolume(left, right);
+   }
+}
+
+void StudioParticipantMap::UpdateParticipantDevice(std::string id, std::string device)
+{
+   if (auto participant = mMap[id]) {
+      if (participant->SetDeviceID(device)) {
+         QueueEvent({ ParticipantEvent::ADDITION, id });
+      }
    }
 }
 
@@ -2198,19 +2194,17 @@ void VirtualStudioPanel::OnMeterWssMessage(ConnectionHdl hdl, websocketpp::confi
             float left = powf(10.0, leftDbVal/20.0);
             float right = powf(10.0, rightDbVal/20.0);
             mSubscriptionsMap->UpdateParticipantVolume(ownerID, left, right);
-            //participant->SetShown(true);
+            mSubscriptionsMap->UpdateParticipantDevice(ownerID, device);
          }
          idx++;
       }
    }
 
-   /*
    for (auto& participant : mSubscriptionsMap->GetMap()) {
       if (!seen[participant.first]) {
-         participant.second->SetShown(false);
+         participant.second->SetDeviceID("");
       }
    }
-   */
 }
 
 void VirtualStudioPanel::OnWssOpen(ConnectionHdl hdl)
@@ -2368,12 +2362,14 @@ void VirtualStudioPanel::InitDevicesWebsocket()
 
 void VirtualStudioPanel::InitMetersWebsocket()
 {
+   std::cout << "InitMetersWebsocket called" << std::endl;
    if (mServerStatus != "Ready" || mServerID.empty() || mServerSessionID.empty()) {
       return;
    }
    if (mMetersClient || mMetersThread) {
       return;
    }
+   std::cout << "InitMetersWebsocket initing" << std::endl;
    mMetersClient.reset(new WSSClient);
    mMetersThread.reset(new boost::thread([&]
       {
