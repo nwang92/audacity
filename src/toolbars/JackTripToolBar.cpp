@@ -786,12 +786,16 @@ void JackTripToolBar::OnAudioSetup(wxCommandEvent& WXUNUSED(evt))
       menu.Bind(wxEVT_MENU_CLOSE, [this](auto&) { mJackTrip->PopUp(); });
       menu.Bind(wxEVT_MENU, &JackTripToolBar::OnAuth, this, kAuthButton);
 
-      menu.Append(kTestButton, _("&Test Record"));
-      menu.Bind(wxEVT_MENU, &JackTripToolBar::OnRecord, this, kTestButton);
+      //menu.Append(kTestButton, _("&Test Record"));
+      //menu.Bind(wxEVT_MENU, &JackTripToolBar::OnRecord, this, kTestButton);
 
-      menu.Append(kPanelButton, _("&Open Panel"));
-      menu.Bind(wxEVT_MENU, &JackTripToolBar::OnPanel, this, kPanelButton);
+      //menu.Append(kPanelButton, _("&Open Panel"));
+      //menu.Bind(wxEVT_MENU, &JackTripToolBar::OnPanel, this, kPanelButton);
    } else {
+      menu.Append(kRefreshButton, _("&Refresh Menu Options"));
+      menu.Bind(wxEVT_MENU, &JackTripToolBar::OnRefresh, this, kRefreshButton);
+      menu.AppendSeparator();
+
       for (auto it = mServerIdToRecordings.begin(); it != mServerIdToRecordings.end(); it++) {
          auto serverID = it->first;
          if (serverID != "") {
@@ -946,8 +950,6 @@ void JackTripToolBar::FillVirtualStudio()
 
    FillServers();
    FillRecordings();
-   std::this_thread::sleep_for(std::chrono::seconds(30));
-   RepopulateMenus();
 }
 
 void JackTripToolBar::FillServers()
@@ -1296,6 +1298,12 @@ void JackTripToolBar::OnDisconnect(wxCommandEvent& event)
 {
    std::cout << "OnDisconnect" << std::endl;
    ToggleStudioPanel("");
+}
+
+void JackTripToolBar::OnRefresh(wxCommandEvent& event)
+{
+   std::cout << "OnRefresh" << std::endl;
+   RepopulateMenus();
 }
 
 void JackTripToolBar::OnAuth(wxCommandEvent& event)

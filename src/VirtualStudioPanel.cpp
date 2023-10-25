@@ -851,6 +851,7 @@ namespace
 
          //Mute button
          auto muteButton = safenew ThemedAButtonWrapper<AButton>(this);
+         muteButton->SetMinSize(wxSize(24, 24));
          muteButton->SetTranslatableLabel(XO("Mute"));
          muteButton->SetToolTip(XO("Mute"));
          muteButton->SetImageIndices(0, bmpMic, bmpMic, bmpMic, bmpMic, bmpMic);
@@ -900,8 +901,8 @@ namespace
          //bottomText->SetForegroundColorIndex(clrTrackPanelText);
          //bottomText->SetLabel("Testing testing testing");
 
-         bottomSizer->Add(muteButton, 0, wxEXPAND, 4);
-         bottomSizer->Add(volumeSlider, 1, wxEXPAND, 4);
+         bottomSizer->Add(muteButton, 0, wxALL | wxEXPAND, 2);
+         bottomSizer->Add(volumeSlider, 1, wxALL | wxEXPAND, 2);
 
          auto controlsSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
          controlsSizer->Add(topSizer.release(), 1, wxLEFT | wxEXPAND, 2);
@@ -942,7 +943,7 @@ namespace
          //mOptionsButton = optionsButton;
 
          auto vSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
-         vSizer->Add(sizer.release(), 0, wxUP | wxDOWN | wxEXPAND, 4);
+         vSizer->Add(sizer.release(), 0, wxUP | wxDOWN | wxEXPAND, 2);
 
          SetSizer(vSizer.release());
 
@@ -1215,6 +1216,7 @@ public:
    {
       // this is a convenience flag to debug participants by showing all subscribers of this studio
       mShowHiddenParticipants = false;
+
       Bind(wxEVT_SIZE, &VirtualStudioParticipantListWindow::OnSizeChanged, this);
 #ifdef __WXMSW__
       //Fixes flickering on redraw
@@ -1248,6 +1250,7 @@ public:
       participantListContainer->Hide();
       mParticipantListContainer = participantListContainer;
 
+      /*
       auto addEffect = safenew ThemedAButtonWrapper<AButton>(this, wxID_ANY);
       addEffect->SetImageIndices(0,
             bmpHButtonNormal,
@@ -1261,6 +1264,7 @@ public:
       addEffect->SetForegroundColorIndex(clrTrackPanelText);
       addEffect->Bind(wxEVT_BUTTON, &VirtualStudioParticipantListWindow::OnAddEffectClicked, this);
       mAddEffect = addEffect;
+      */
 
       auto participantsHint = safenew ThemedWindowWrapper<wxStaticText>(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxST_NO_AUTORESIZE);
       //Workaround: text is set in the OnSizeChange
@@ -1291,7 +1295,7 @@ public:
 
       rootSizer->Add(participantsTitle, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 4);
       rootSizer->Add(participantListContainer, 0, wxEXPAND | wxBOTTOM, 0);
-      rootSizer->Add(addEffect, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 20);
+      //rootSizer->Add(addEffect, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 20);
       rootSizer->Add(participantsHint, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 20);
       rootSizer->Add(studioLink, 0, wxLEFT | wxRIGHT | wxEXPAND, 20);
 
@@ -1463,7 +1467,7 @@ public:
          //in wxWidgets yet, so for now we just do it manually
 
          //Restore original text, because 'Wrap' will replace it with wrapped one
-         mParticipantsHint->SetLabel(_("Manage participants in this studio once they join."));
+         mParticipantsHint->SetLabel(_("View participants in this studio once they join."));
          mParticipantsHint->Wrap(GetClientSize().x - sizerItem->GetBorder() * 2);
          mParticipantsHint->InvalidateBestSize();
       }
@@ -1609,7 +1613,7 @@ public:
       if (isEmpty) {
          mParticipantListContainer->Hide();
       } else {
-         mAddEffect->SetEnabled(true);
+         //mAddEffect->SetEnabled(true);
          //Workaround for GTK: Underlying GTK widget does not update
          //its size when wxWindow size is set to zero
          mParticipantListContainer->Show(true);

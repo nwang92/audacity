@@ -79,6 +79,7 @@ class JackTripToolBar final : public ToolBar {
    static constexpr int kTestButton = 15802;
    static constexpr int kPanelButton = 15803;
    static constexpr int kDisconnectButton = 15804;
+   static constexpr int kRefreshButton = 15805;
 
  public:
    static Identifier ID();
@@ -109,6 +110,7 @@ class JackTripToolBar final : public ToolBar {
    void OnRecording(std::string serverID, int id);
    void OnRecord(wxCommandEvent& event);
    void OnPanel(wxCommandEvent& event);
+   void OnRefresh(wxCommandEvent& event);
    void OnAuth(wxCommandEvent& event);
    void OnDisconnect(wxCommandEvent& event);
    std::string ExecCommand(const char* cmd);
