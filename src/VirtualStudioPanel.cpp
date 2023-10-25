@@ -339,6 +339,7 @@ namespace
          mHeight(size.y),
          mGradient(true),
          mDB(true),
+         mNumBars(2),
          mNumPeakSamplesToClip(3),
          mPeakHoldDuration(3),
          mDBRange(DecibelScaleCutoff.Read()),
@@ -346,6 +347,10 @@ namespace
       {
          Bind(wxEVT_PAINT, &ParticipantBars::OnPaint, this);
          Bind(wxEVT_SIZE, &ParticipantBars::OnSize, this);
+
+         for (unsigned int j=0; j<mNumBars; j++) {
+            mBar[j] = VSMeterBar{};
+         }
       }
 
       ~ParticipantBars() {}
@@ -586,9 +591,6 @@ namespace
 
          // barh is now the height of the canvas
          barh = height;
-
-         // We always have 2 bars
-         mNumBars = 2;
 
          // Save dimensions of the left bevel
          mBar[0].b = wxRect(left, top, barw, barh);
@@ -922,17 +924,21 @@ namespace
             case ParticipantEvent::SHOW:
                if (mParticipant->GetID() == evt.mUid) {
                   std::cout << "Show " << mParticipant->GetName() << std::endl;
-                  this->Show(true);
-                  Update();
-                  GetSizer()->Layout();
+                  {
+                     this->Show(true);
+                     Update();
+                     GetSizer()->Layout();
+                  }
                }
                break;
             case ParticipantEvent::HIDE:
             if (mParticipant->GetID() == evt.mUid) {
                   std::cout << "Hide " << mParticipant->GetName() << std::endl;
-                  this->Show(false);
-                  Update();
-                  GetSizer()->Layout();
+                  {
+                     this->Show(false);
+                     Update();
+                     GetSizer()->Layout();
+                  }
                }
                break;
             default:
@@ -945,10 +951,12 @@ namespace
             if (mParticipantName) {
                mParticipantName->SetLabel(name);
             }
-            /*
             auto device = mParticipant->GetDeviceID();
-            this->Show(!device.empty());
-            */
+            {
+               this->Show(!device.empty());
+               Update();
+               GetSizer()->Layout();
+            }
          }
       }
 
@@ -1494,13 +1502,11 @@ public:
          auto participant = mSubscriptionsMap->GetParticipantByID(std::string(sortedUserIDs[i].mb_str()));
          if (participant) {
             InsertParticipantRow(i, participant);
-            /*
             auto device = participant->GetDeviceID();
             if (!device.empty()) {
                isEmpty = false;
             }
-            */
-            isEmpty = false;
+            //isEmpty = false;
          }
       }
 
