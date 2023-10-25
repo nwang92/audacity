@@ -12,6 +12,7 @@
 
 #include <math.h>
 #include <memory>
+#include <fstream>
 
 #include <wx/image.h>
 #include <wx/bitmap.h>
@@ -32,7 +33,9 @@
 #include <rapidjson/document.h>
 
 //#include "./widgets/MeterPanel.h"
+#include "Theme.h"
 #include "ThemedWrappers.h"
+#include "TempDirectory.h"
 #include "Observer.h"
 #include "Decibels.h"
 
@@ -84,8 +87,8 @@ struct ParticipantEvent
       // Posted when participant is shown
       SHOW,
 
-      // Posted when a new participant is added
-      ADDITION,
+      // Posted when a new participant is added or removed
+      REFRESH,
 
       //! Posted when the set of selected tracks changes.
       SELECTION_CHANGE,
@@ -132,11 +135,15 @@ public:
    std::string GetID();
    std::string GetName();
    std::string GetPicture();
+   wxImage GetImage();
    std::string GetDeviceID();
    float GetLeftVolume();
    float GetRightVolume();
    void UpdateVolume(float left, float right);
    bool SetDeviceID(std::string deviceID);
+   std::string GetDownloadLocalDir();
+   void FetchImage();
+   void LoadImage();
    void QueueEvent(ParticipantEvent event);
 
 private:
@@ -147,6 +154,9 @@ private:
    std::string mDeviceID;
    wxBitmap mBitmap;
    wxImage mImage;
+   std::string mImageFile;
+   std::ofstream mDownloadOutput;
+
    float mLeftVolume;
    float mRightVolume;
 };
@@ -268,6 +278,7 @@ private:
    void OnDeviceWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg);
    void OnMeterWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg);
    void OnWssOpen(ConnectionHdl hdl);
+   void OnWssClose(ConnectionHdl hdl);
    static websocketpp::lib::shared_ptr<SslContext> OnTlsInit();
    void DisableLogging(const std::shared_ptr<WSSClient>& client);
    void Connect(const std::shared_ptr<WSSClient>& client, std::string url);

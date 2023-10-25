@@ -905,7 +905,7 @@ namespace
       }
 
       void SetParticipant(AudacityProject& project,
-         const std::shared_ptr<StudioParticipant>& participant)
+         const std::shared_ptr<StudioParticipant>& participant, bool showHidden = false)
       {
          mProject = &project;
          mParticipant = participant;
@@ -921,6 +921,7 @@ namespace
                   mMeter->UpdateDisplay(1, mParticipant->GetLeftVolume(), mParticipant->GetRightVolume());
                }
                break;
+            /* TODO: Pretty sure this doesn't actually work
             case ParticipantEvent::SHOW:
                if (mParticipant->GetID() == evt.mUid) {
                   std::cout << "Show " << mParticipant->GetName() << std::endl;
@@ -932,7 +933,7 @@ namespace
                }
                break;
             case ParticipantEvent::HIDE:
-            if (mParticipant->GetID() == evt.mUid) {
+               if (mParticipant->GetID() == evt.mUid) {
                   std::cout << "Hide " << mParticipant->GetName() << std::endl;
                   {
                      this->Show(false);
@@ -941,6 +942,7 @@ namespace
                   }
                }
                break;
+            */
             default:
                break;
             }
@@ -951,11 +953,17 @@ namespace
             if (mParticipantName) {
                mParticipantName->SetLabel(name);
             }
-            auto device = mParticipant->GetDeviceID();
-            {
-               this->Show(!device.empty());
-               Update();
-               GetSizer()->Layout();
+            auto img = mParticipant->GetImage();
+            if (mEnableButton) {
+               mEnableButton->SetImages(img, img, img, img, img);
+            }
+            if (!showHidden) {
+               auto device = mParticipant->GetDeviceID();
+               {
+                  this->Show(!device.empty());
+                  Update();
+                  GetSizer()->Layout();
+               }
             }
          }
       }
@@ -1095,6 +1103,8 @@ class VirtualStudioParticipantListWindow
    wxWindow* mParticipantListContainer{nullptr};
    StudioParticipantMap* mSubscriptionsMap{nullptr};
 
+   bool mShowHiddenParticipants;
+
    std::unique_ptr<MenuTable::MenuItem> mEffectMenuRoot;
 
    Observer::Subscription mParticipantChangeSubscription;
@@ -1108,6 +1118,7 @@ public:
                      const wxString& name = wxPanelNameStr)
       : wxScrolledWindow(parent, winid, pos, size, style, name)
    {
+      mShowHiddenParticipants = false;
       Bind(wxEVT_SIZE, &VirtualStudioParticipantListWindow::OnSizeChanged, this);
 #ifdef __WXMSW__
       //Fixes flickering on redraw
@@ -1115,33 +1126,19 @@ public:
 #endif
       auto vsp = dynamic_cast<VirtualStudioPanel*>(parent);
       mSubscriptionsMap = vsp->GetSubscriptionsMap();
-      mParticipantChangeSubscription = mSubscriptionsMap->Subscribe(
-         [this](ParticipantEvent)
-         {
-            std::cout << "Participant list changed" << std::endl;
-            ReloadEffectsList();
-         });
-      /*
+
+      mParticipantChangeSubscription.Reset();
       mParticipantChangeSubscription = mSubscriptionsMap->Subscribe([this](const ParticipantEvent& evt) {
          switch (evt.mType)
          {
-         case ParticipantEvent::ADDITION:
+         case ParticipantEvent::REFRESH:
             std::cout << "Participant list changed" << std::endl;
-            ReloadEffectsList();
-            break;
-         case ParticipantEvent::SHOWN:
-            std::cout << "LALALAA" << std::endl;
-            ReloadEffectsList();
-            break;
-         case ParticipantEvent::HIDDEN:
-            std::cout << "BOOOOYYY" << std::endl;
             ReloadEffectsList();
             break;
          default:
             break;
          }
       });
-      */
 
       auto rootSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
 
@@ -1502,11 +1499,14 @@ public:
          auto participant = mSubscriptionsMap->GetParticipantByID(std::string(sortedUserIDs[i].mb_str()));
          if (participant) {
             InsertParticipantRow(i, participant);
-            auto device = participant->GetDeviceID();
-            if (!device.empty()) {
+            if (mShowHiddenParticipants) {
                isEmpty = false;
+            } else {
+               auto device = participant->GetDeviceID();
+               if (!device.empty()) {
+                  isEmpty = false;
+               }
             }
-            //isEmpty = false;
          }
       }
 
@@ -1576,7 +1576,7 @@ public:
 
       auto row = safenew ThemedWindowWrapper<ParticipantControl>(mParticipantListContainer, this, wxID_ANY);
       row->SetBackgroundColorIndex(clrEffectListItemBackground);
-      row->SetParticipant(*mProject, p);
+      row->SetParticipant(*mProject, p, mShowHiddenParticipants);
       mParticipantListContainer->GetSizer()->Insert(index, row, 0, wxEXPAND);
    }
 };
@@ -1624,14 +1624,14 @@ StudioParticipant::StudioParticipant(wxWindow* parent, std::string id, std::stri
    mLeftVolume = 0;
    mRightVolume = 0;
    mDeviceID = "";
+   mImage = theTheme.Image(bmpAnonymousUser);
 
-   /*
    if (!picture.empty()) {
-      if (!mImage.LoadFile(picture, wxBITMAP_TYPE_JPEG)) {
-         std::cout << "failed to load file: " << picture << std::endl;
-      }
+      FetchImage();
+      //if (!mImage.LoadFile(picture, wxBITMAP_TYPE_ANY)) {
+      //   std::cout << "failed to load file: " << picture << std::endl;
+      //}
    }
-   */
 }
 
 StudioParticipant::~StudioParticipant()
@@ -1651,6 +1651,11 @@ std::string StudioParticipant::GetName()
 std::string StudioParticipant::GetPicture()
 {
    return mPicture;
+}
+
+wxImage StudioParticipant::GetImage()
+{
+   return mImage;
 }
 
 std::string StudioParticipant::GetDeviceID()
@@ -1692,6 +1697,92 @@ bool StudioParticipant::SetDeviceID(std::string deviceID)
    return true;
 }
 
+std::string StudioParticipant::GetDownloadLocalDir()
+{
+   auto tempDefaultLoc = TempDirectory::DefaultTempDir();
+   return wxFileName(tempDefaultLoc, mID).GetFullPath().ToStdString();
+}
+
+void StudioParticipant::FetchImage()
+{
+   std::cout << "Picture URL: " << mPicture << std::endl;
+   if (mPicture.empty() || mPicture.rfind("http") != 0) {
+      return;
+   }
+
+   auto outputDir = GetDownloadLocalDir();
+   if (!wxDirExists(outputDir)) {
+      wxMkdir(outputDir);
+   }
+
+   // get last segment from URL and use this as the filename
+   std::string imgName = mPicture.substr(0, mPicture.rfind("?"));
+   imgName = imgName.substr(imgName.rfind("/")+1);
+
+   mImageFile = wxFileName(outputDir, imgName).GetFullPath().ToStdString();
+
+   // check if this image file exists
+   std::ifstream f(mImageFile.c_str());
+   if (f.good()) {
+      LoadImage();
+      return;
+   }
+
+   mDownloadOutput.open(mImageFile, std::ios::binary);
+   wxLogInfo("Downloading to: %s", mImageFile);
+
+   audacity::network_manager::Request request(mPicture);
+   auto response = audacity::network_manager::NetworkManager::GetInstance().doGet(request);
+
+   response->setRequestFinishedCallback(
+      [response, this](auto)
+      {
+         const auto httpCode = response->getHTTPCode();
+         wxLogInfo("FetchImage HTTP code: %d", httpCode);
+
+         if (mDownloadOutput.is_open()) {
+            mDownloadOutput.close();
+         }
+         wxLogInfo("Download complete");
+         LoadImage();
+      }
+   );
+
+   // Called each time, since downloading for get data.
+   response->setOnDataReceivedCallback([response, this](audacity::network_manager::IResponse*) {
+      if (response->getError() == audacity::network_manager::NetworkError::NoError) {
+         std::vector<char> buffer(response->getBytesAvailable());
+         size_t bytes = response->readData(buffer.data(), buffer.size());
+
+         if (mDownloadOutput.is_open()) {
+            mDownloadOutput.write(buffer.data(), buffer.size());
+         }
+      }
+   });
+}
+
+void StudioParticipant::LoadImage()
+{
+   if (mImageFile.empty()) {
+      return;
+   }
+
+   if (!mImage.LoadFile(mImageFile, wxBITMAP_TYPE_ANY)) {
+      std::cout << "Failed to load mImage from " << mImageFile << std::endl;
+   }
+   mImage = mImage.Rescale(24, 24);
+
+   /* Supposedly we could do this but I can't get it to work: https://forums.wxwidgets.org/viewtopic.php?t=25202
+   wxMemoryInputStream *memin = new wxMemoryInputStream(mMemBuf.GetData(), mMemBuf.GetDataLen());
+   std::cout << "URL: " << mPicture << " is ok " << memin->IsOk() << " size " << memin->GetSize() << std::endl;
+
+   wxImage *newImage = new wxImage();
+   if (!newImage->LoadFile(*memin, wxBITMAP_TYPE_ANY)) {
+      std::cout << "Failed to load newImage" << std::endl;
+   }
+   */
+}
+
 void StudioParticipant::QueueEvent(ParticipantEvent event)
 {
    BasicUI::CallAfter([this, event = std::move(event)]{ this->Publish(event); });
@@ -1720,7 +1811,7 @@ void StudioParticipantMap::AddParticipant(std::string id, std::string name, std:
 {
    auto p = std::make_shared<StudioParticipant>(mParent, id, name, picture);
    mMap[id] = p;
-   QueueEvent({ ParticipantEvent::ADDITION, id });
+   QueueEvent({ ParticipantEvent::REFRESH, id });
 }
 
 void StudioParticipantMap::UpdateParticipantVolume(std::string id, float left, float right)
@@ -1734,7 +1825,7 @@ void StudioParticipantMap::UpdateParticipantDevice(std::string id, std::string d
 {
    if (auto participant = mMap[id]) {
       if (participant->SetDeviceID(device)) {
-         QueueEvent({ ParticipantEvent::ADDITION, id });
+         QueueEvent({ ParticipantEvent::REFRESH, id });
       }
    }
 }
@@ -2155,7 +2246,12 @@ void VirtualStudioPanel::OnDeviceWssMessage(ConnectionHdl hdl, websocketpp::conf
 
    auto deviceID = std::string(document["id"].GetString());
    auto ownerID = std::string(document["ownerId"].GetString());
-   mDeviceToOwnerMap[deviceID] = ownerID;
+   auto serverID = std::string(document["serverId"].GetString());
+   if (serverID == mServerID) {
+      mDeviceToOwnerMap[deviceID] = ownerID;
+   } else {
+      mDeviceToOwnerMap.erase(deviceID);
+   }
 }
 
 void VirtualStudioPanel::OnMeterWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg)
@@ -2182,11 +2278,12 @@ void VirtualStudioPanel::OnMeterWssMessage(ConnectionHdl hdl, websocketpp::confi
          std::string ownerID = "";
          if (device != "Jamulus" && device != "supernova") {
             if (device.rfind("rtc-") == 0) {
-               // webrtc client
-               ownerID = device.substr(4);
+               // TODO: Support webrtc client
+               //ownerID = device.substr(4);
+               ;
             } else {
                auto it = mDeviceToOwnerMap.find(device);
-               if (it!= mDeviceToOwnerMap.end()) {
+               if (it != mDeviceToOwnerMap.end()) {
                   ownerID = it->second;
                }
             }
@@ -2208,7 +2305,7 @@ void VirtualStudioPanel::OnMeterWssMessage(ConnectionHdl hdl, websocketpp::confi
 
    for (auto& participant : mSubscriptionsMap->GetMap()) {
       if (!seen[participant.first]) {
-         participant.second->SetDeviceID("");
+         mSubscriptionsMap->UpdateParticipantDevice(participant.first, "");
       }
    }
 }
@@ -2216,6 +2313,14 @@ void VirtualStudioPanel::OnMeterWssMessage(ConnectionHdl hdl, websocketpp::confi
 void VirtualStudioPanel::OnWssOpen(ConnectionHdl hdl)
 {
    std::cout << "yaaaayyy" << std::endl;
+   //std::string msg{"hello"};
+   //std::cout << "on_open: send " << msg << std::endl;
+   //client->send(hdl, msg, websocketpp::frame::opcode::text);
+}
+
+void VirtualStudioPanel::OnWssClose(ConnectionHdl hdl)
+{
+   std::cout << "noooooooooooo" << std::endl;
    //std::string msg{"hello"};
    //std::cout << "on_open: send " << msg << std::endl;
    //client->send(hdl, msg, websocketpp::frame::opcode::text);
@@ -2286,6 +2391,7 @@ void VirtualStudioPanel::InitServerWebsocket()
          mServerClient->start_perpetual();
          mServerClient->set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
          mServerClient->set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
+         mServerClient->set_close_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssClose, this, ::_1));
          mServerClient->set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnServerWssMessage, this, ::_1, ::_2));
          std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "?auth_code=" + mAccessToken;
          Connect(mServerClient, url);
@@ -2317,6 +2423,7 @@ void VirtualStudioPanel::InitSubscriptionsWebsocket()
          mSubscriptionsClient->start_perpetual();
          mSubscriptionsClient->set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
          mSubscriptionsClient->set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
+         mSubscriptionsClient->set_close_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssClose, this, ::_1));
          mSubscriptionsClient->set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnSubscriptionWssMessage, this, ::_1, ::_2));
          std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "/subscriptions?auth_code=" + mAccessToken;
          Connect(mSubscriptionsClient, url);
@@ -2348,6 +2455,7 @@ void VirtualStudioPanel::InitDevicesWebsocket()
          mDevicesClient->start_perpetual();
          mDevicesClient->set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
          mDevicesClient->set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
+         mDevicesClient->set_close_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssClose, this, ::_1));
          mDevicesClient->set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnDeviceWssMessage, this, ::_1, ::_2));
          std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "/devices?auth_code=" + mAccessToken;
          Connect(mDevicesClient, url);
@@ -2385,6 +2493,7 @@ void VirtualStudioPanel::InitMetersWebsocket()
          mMetersClient->start_perpetual();
          mMetersClient->set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
          mMetersClient->set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
+         mMetersClient->set_close_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssClose, this, ::_1));
          mMetersClient->set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnMeterWssMessage, this, ::_1, ::_2));
          std::string secret = sha256("jktp-" + mServerID + "-" + mServerSessionID);
          std::string url = "wss://" + mServerSessionID + ".jacktrip.cloud/meters?auth_code=" + secret;
