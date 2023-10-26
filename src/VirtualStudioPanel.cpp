@@ -57,10 +57,6 @@
 #include "WindowAccessible.h"
 #endif
 
-// wut https://github.com/Tencent/rapidjson/issues/1448
-#ifdef _MSC_VER
-#undef GetObject
-#endif
 
 namespace
 {
@@ -2939,11 +2935,15 @@ void VirtualStudioPanel::FetchActiveServerParticipants()
 
          std::map<std::string, bool> activeParticipants;
 
-         // Iterate over the array of objects
-         rapidjson::Value::ConstValueIterator itr;
-         for (itr = document.Begin(); itr != document.End(); ++itr) {
-            auto uid = std::string(itr->GetObject()["user_id"].GetString());
-            //std::cout << "Found " << uid << std::endl;
+         if (!document.IsArray()) {
+            return;
+         }
+
+         for (auto& v : document.GetArray()) {
+            if (!v.HasMember("user_id")) {
+               continue;
+            }
+            auto uid = std::string(v["user_id"].GetString());
             if (!uid.empty()) {
                activeParticipants[uid] = true;
             }
