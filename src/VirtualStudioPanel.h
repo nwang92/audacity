@@ -56,9 +56,13 @@ class wxStaticText;
 class wxBitmapButton;
 
 class VirtualStudioParticipantListWindow;
+class VirtualStudioPanel;
+class ConnectionMetadata;
+class WebsocketEndpoint;
 class AudacityProject;
 
 const int kMaxVSMeterBars = 2;
+const int kVSMeterBarsGap = 2;
 
 struct VSMeterBar {
    bool   vert;
@@ -103,6 +107,23 @@ struct ParticipantEvent
    const Type mType;
    //const std::weak_ptr<StudioParticipant> mParticipant;
    const std::string mUid;
+};
+
+//! Notification of changes in websocket connection
+struct WebsocketEvent
+{
+   enum Type {
+      // Posted when volume is changed
+      RECONNECT,
+   };
+
+   WebsocketEvent( Type type )
+      : mType{ type }
+   {}
+
+   WebsocketEvent( const WebsocketEvent& ) = default;
+
+   const Type mType;
 };
 
 class StudioParticipant final
@@ -174,6 +195,67 @@ private:
    std::map<std::string, std::shared_ptr<StudioParticipant>> mMap;
 };
 
+enum WSSType {
+   SERVER,
+   SUBSCRIPTIONS,
+   DEVICES,
+   METERS,
+};
+
+class ConnectionMetadata final
+   : public Observer::Publisher<WebsocketEvent> {
+public:
+   typedef websocketpp::lib::shared_ptr<ConnectionMetadata> ptr;
+   ConnectionMetadata(VirtualStudioPanel* panel, int id, ConnectionHdl hdl, const std::string &uri, WSSType type);
+   void OnOpen(WSSClient* client, ConnectionHdl hdl);
+   void OnFail(WSSClient* client, ConnectionHdl hdl);
+   void OnClose(WSSClient* client, ConnectionHdl hdl);
+   void OnMessage(ConnectionHdl hdl, WSSClient::message_ptr msg);
+   void HandleServerMessage(const rapidjson::Document &document);
+   void HandleSubscriptionsMessage(const rapidjson::Document &document);
+   void HandleDevicesMessage(const rapidjson::Document &document);
+   void HandleMetersMessage(const rapidjson::Document &document);
+   void QueueEvent(WebsocketEvent event);
+   const websocketpp::connection_hdl GetHdl() { return mHdl; }
+   const int GetID() { return mID; }
+   const std::string GetStatus() { return mStatus; }
+
+private:
+   VirtualStudioPanel* mPanel;
+   int mID;
+   ConnectionHdl mHdl;
+   std::string mStatus;
+   std::string mUri;
+   WSSType mType;
+   std::string mErrorReason;
+   std::vector<std::string> mMessages;
+};
+
+class WebsocketEndpoint {
+public:
+   WebsocketEndpoint(VirtualStudioPanel* panel, const std::string &uri, WSSType type);
+   ~WebsocketEndpoint();
+   static websocketpp::lib::shared_ptr<SslContext> OnTlsInit();
+   void DisableLogging();
+   void SetReconnect(bool reconnect);
+   int Connect();
+   void Close(int id, websocketpp::close::status::value code, std::string reason);
+   const ConnectionMetadata::ptr GetMetadata(int id);
+
+private:
+   typedef std::map<int, ConnectionMetadata::ptr> con_list;
+
+   VirtualStudioPanel* mPanel;
+   WSSClient mClient;
+   std::string mUri;
+   WSSType mType;
+   websocketpp::lib::shared_ptr<boost::thread> mThread;
+   Observer::Subscription mConnectionSubscription;
+   con_list mConnectionList;
+   int mNextID;
+   bool mReconnect;
+};
+
 /**
  * \brief UI Panel that displays realtime effects from the effect stack of
  * an individual track, provides controls for accessing effect settings,
@@ -202,14 +284,10 @@ class VirtualStudioPanel : public wxPanel
    bool mServerEnabled = 0;
    bool mServerAdmin = 0;
 
-   std::shared_ptr<WSSClient> mServerClient{nullptr};
-   std::shared_ptr<boost::thread> mServerThread{nullptr};
-   std::shared_ptr<WSSClient> mSubscriptionsClient{nullptr};
-   std::shared_ptr<boost::thread> mSubscriptionsThread{nullptr};
-   std::shared_ptr<WSSClient> mDevicesClient{nullptr};
-   std::shared_ptr<boost::thread> mDevicesThread{nullptr};
-   std::shared_ptr<WSSClient> mMetersClient{nullptr};
-   std::shared_ptr<boost::thread> mMetersThread{nullptr};
+   std::shared_ptr<WebsocketEndpoint> mServerClient{nullptr};
+   std::shared_ptr<WebsocketEndpoint> mSubscriptionsClient{nullptr};
+   std::shared_ptr<WebsocketEndpoint> mDevicesClient{nullptr};
+   std::shared_ptr<WebsocketEndpoint> mMetersClient{nullptr};
 
    StudioParticipantMap* mSubscriptionsMap{nullptr};
    std::map<std::string, std::string> mDeviceToOwnerMap;
@@ -242,15 +320,9 @@ public:
    void DoClose();
    void OnJoin(const wxCommandEvent& event);
    StudioParticipantMap* GetSubscriptionsMap();
+   std::map<std::string, std::string>* GetDeviceToOwnerMap();
    void SetStudio(std::string serverID, std::string accessToken);
    void ResetStudio();
-
-   bool IsTopNavigationDomain(NavigationKind) const override { return true; }
-
-   void SetFocus() override;
-
-private:
-   void OnCharHook(wxKeyEvent& evt);
    void UpdateServerName(std::string name);
    void UpdateServerStatus(std::string status);
    void UpdateServerBanner(std::string banner);
@@ -261,16 +333,13 @@ private:
    void UpdateServerSampleRate(double sampleRate);
    void UpdateServerBroadcast(int broadcast);
 
-   void OnServerWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg);
-   void OnSubscriptionWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg);
-   void OnDeviceWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg);
-   void OnMeterWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg);
-   void OnWssOpen(ConnectionHdl hdl);
-   void OnWssClose(ConnectionHdl hdl);
-   static websocketpp::lib::shared_ptr<SslContext> OnTlsInit();
-   void DisableLogging(const std::shared_ptr<WSSClient>& client);
-   void Connect(const std::shared_ptr<WSSClient>& client, std::string url);
-   void Disconnect(std::shared_ptr<WSSClient>& client, std::shared_ptr<boost::thread>& thread);
+   bool IsTopNavigationDomain(NavigationKind) const override { return true; }
+
+   void SetFocus() override;
+
+private:
+   void OnCharHook(wxKeyEvent& evt);
+   void Disconnect(std::shared_ptr<WebsocketEndpoint>& endpoint);
    void InitializeWebsockets();
    void StopWebsockets();
    void InitServerWebsocket();
@@ -279,4 +348,5 @@ private:
    void InitMetersWebsocket();
    void StopMetersWebsocket();
    void FetchOwner(std::string ownerID);
+   void FetchServer();
 };

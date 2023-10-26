@@ -57,8 +57,6 @@
 #include "WindowAccessible.h"
 #endif
 
-const static int gap = 2;
-
 namespace
 {
 
@@ -551,10 +549,10 @@ namespace
                mBar[iBar].rClip.height = 3;
 
                // Make room for the clipping indicator
-               mBar[iBar].b.y += 3 + gap;
-               mBar[iBar].b.height -= 3 + gap;
-               mBar[iBar].r.y += 3 + gap;
-               mBar[iBar].r.height -= 3 + gap;
+               mBar[iBar].b.y += 3 + kVSMeterBarsGap;
+               mBar[iBar].b.height -= 3 + kVSMeterBarsGap;
+               mBar[iBar].r.y += 3 + kVSMeterBarsGap;
+               mBar[iBar].r.height -= 3 + kVSMeterBarsGap;
             }
          }
          else
@@ -567,7 +565,7 @@ namespace
 
                // Create the indicator rectangle
                mBar[iBar].rClip = mBar[iBar].b;
-               mBar[iBar].rClip.x = mBar[iBar].b.GetRight() + 1 + gap; // +1 for bevel
+               mBar[iBar].rClip.x = mBar[iBar].b.GetRight() + 1 + kVSMeterBarsGap; // +1 for bevel
                mBar[iBar].rClip.width = 3;
             }
          }
@@ -585,10 +583,10 @@ namespace
          int rside;
 
          // height is now the entire height of the meter canvas
-         height -= top + gap;
+         height -= top + kVSMeterBarsGap;
 
          // barw is half of the canvas while allowing for a gap between meters
-         barw = (width - gap) / 2;
+         barw = (width - kVSMeterBarsGap) / 2;
 
          // barh is now the height of the canvas
          barh = height;
@@ -598,7 +596,7 @@ namespace
 
          // Save dimensions of the right bevel
          mBar[1].b = mBar[0].b;
-         mBar[1].b.SetLeft(mBar[0].b.GetRight() + 1 + gap); // +1 for right edge
+         mBar[1].b.SetLeft(mBar[0].b.GetRight() + 1 + kVSMeterBarsGap); // +1 for right edge
 
          // Set bar and clipping indicator dimensions
          SetBarAndClip(0, true);
@@ -1281,7 +1279,6 @@ public:
       participantListContainer->Hide();
       mParticipantListContainer = participantListContainer;
 
-      /*
       auto addEffect = safenew ThemedAButtonWrapper<AButton>(this, wxID_ANY);
       addEffect->SetImageIndices(0,
             bmpHButtonNormal,
@@ -1295,7 +1292,6 @@ public:
       addEffect->SetForegroundColorIndex(clrTrackPanelText);
       addEffect->Bind(wxEVT_BUTTON, &VirtualStudioParticipantListWindow::OnAddEffectClicked, this);
       mAddEffect = addEffect;
-      */
 
       auto participantsHint = safenew ThemedWindowWrapper<wxStaticText>(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxST_NO_AUTORESIZE);
       //Workaround: text is set in the OnSizeChange
@@ -1326,7 +1322,7 @@ public:
 
       rootSizer->Add(participantsTitle, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 4);
       rootSizer->Add(participantListContainer, 0, wxEXPAND | wxBOTTOM, 0);
-      //rootSizer->Add(addEffect, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 20);
+      rootSizer->Add(addEffect, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 20);
       rootSizer->Add(participantsHint, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 20);
       rootSizer->Add(studioLink, 0, wxLEFT | wxRIGHT | wxEXPAND, 20);
 
@@ -1619,6 +1615,7 @@ public:
 
       bool isEmpty = true;
 
+      // TODO: This area could use a lock around mSubscriptionsMap access
       wxArrayString userIDs;
       for (auto& participant : mSubscriptionsMap->GetMap()) {
          userIDs.push_back(participant.first);
@@ -1628,15 +1625,16 @@ public:
       for(size_t i = 0, count = sortedUserIDs.GetCount(); i < count; ++i) {
          auto uid = std::string(sortedUserIDs[i].mb_str());
          auto participant = mSubscriptionsMap->GetParticipantByID(std::string(sortedUserIDs[i].mb_str()));
-         if (participant) {
-            InsertParticipantRow(i, participant);
-            if (mShowHiddenParticipants) {
+         if (!participant) {
+            break;
+         }
+         InsertParticipantRow(i, participant);
+         if (mShowHiddenParticipants) {
+            isEmpty = false;
+         } else {
+            auto device = participant->GetDeviceID();
+            if (!device.empty()) {
                isEmpty = false;
-            } else {
-               auto device = participant->GetDeviceID();
-               if (!device.empty()) {
-                  isEmpty = false;
-               }
             }
          }
       }
@@ -1698,6 +1696,7 @@ public:
    void InsertParticipantRow(size_t index, const std::shared_ptr<StudioParticipant> p)
    {
       if (mProject == nullptr || mServerID.empty()) {
+         std::cout << "shit" << std::endl;
          return;
       }
 
@@ -1978,6 +1977,9 @@ std::shared_ptr<StudioParticipant> StudioParticipantMap::GetParticipantByID(std:
 
 void StudioParticipantMap::AddParticipant(std::string id, std::string name, std::string picture)
 {
+   if (auto participant = mMap[id]) {
+      return;
+   }
    auto p = std::make_shared<StudioParticipant>(mParent, id, name, picture);
    mMap[id] = p;
    QueueEvent({ ParticipantEvent::REFRESH, id });
@@ -2040,6 +2042,343 @@ void StudioParticipantMap::Print()
    for (auto participant : mMap) {
       std::cout << participant.first << " " << participant.second->GetName() << std::endl;
    };
+}
+
+ConnectionMetadata::ConnectionMetadata(VirtualStudioPanel* panel, int id, ConnectionHdl hdl, const std::string &uri, WSSType type)
+{
+   mPanel = panel;
+   mID = id;
+   mHdl = hdl;
+   mUri = uri;
+   mType = type;
+   mStatus = "Connecting";
+}
+
+void ConnectionMetadata::OnOpen(WSSClient* client, ConnectionHdl hdl)
+{
+   mStatus = "Open";
+   WSSClient::connection_ptr con = client->get_con_from_hdl(hdl);
+
+   std::cout << "Connection #" << mID << " opened to " << mUri << std::endl;
+}
+
+void ConnectionMetadata::OnFail(WSSClient* client, ConnectionHdl hdl)
+{
+   mStatus = "Failed";
+   WSSClient::connection_ptr con = client->get_con_from_hdl(hdl);
+   mErrorReason = con->get_ec().message();
+
+   std::cout << "Connection #" << mID << " to " << mUri << " failed with: " << mErrorReason << std::endl;
+}
+
+void ConnectionMetadata::OnClose(WSSClient* client, ConnectionHdl hdl)
+{
+   mStatus = "Closed";
+   WSSClient::connection_ptr con = client->get_con_from_hdl(hdl);
+   auto code = con->get_remote_close_code();
+   if (code != websocketpp::close::status::normal) {
+      QueueEvent({ WebsocketEvent::RECONNECT });
+   }
+
+   std::stringstream s;
+   s << "close code: " << con->get_remote_close_code() << " ("
+      << websocketpp::close::status::get_string(con->get_remote_close_code())
+      << "), close reason: " << con->get_remote_close_reason();
+   mErrorReason = s.str();
+   std::cout << "Connection #" << mID << " to " << mUri << " closed with: " << mErrorReason << std::endl;
+}
+
+void ConnectionMetadata::OnMessage(ConnectionHdl hdl, WSSClient::message_ptr msg)
+{
+   using namespace rapidjson;
+   auto payload = msg->get_payload();
+
+   rapidjson::Document document;
+   document.Parse(payload.c_str());
+   // Check for parse errors
+   if (document.HasParseError()) {
+      wxLogInfo("Error parsing JSON: %s", document.GetParseError());
+      return;
+   }
+
+   if (mType == WSSType::SERVER) {
+      HandleServerMessage(document);
+   } else if (mType == WSSType::SUBSCRIPTIONS) {
+      HandleSubscriptionsMessage(document);
+   } else if (mType == WSSType::DEVICES) {
+      HandleDevicesMessage(document);
+   } else if (mType == WSSType::METERS) {
+      HandleMetersMessage(document);
+   } else {
+      std::cout << "Unhandled message is " << payload << std::endl;
+   }
+}
+
+void ConnectionMetadata::HandleServerMessage(const rapidjson::Document &document)
+{
+   // skip warning/alert messages passed on this socket
+   if (document.HasMember("message")) {
+      return;
+   }
+   mPanel->UpdateServerName(document["name"].GetString());
+   mPanel->UpdateServerStatus(document["status"].GetString());
+   std::string banner;
+   if (document.HasMember("bannerURL")) {
+      banner = document["bannerURL"].GetString();
+   }
+   mPanel->UpdateServerBanner(banner);
+   mPanel->UpdateServerSessionID(document["sessionId"].GetString());
+   mPanel->UpdateServerOwnerID(document["ownerId"].GetString());
+   mPanel->UpdateServerSampleRate(document["sampleRate"].GetDouble());
+   mPanel->UpdateServerBroadcast(document["broadcast"].GetInt());
+   mPanel->UpdateServerEnabled(document["enabled"].GetBool());
+}
+
+void ConnectionMetadata::HandleSubscriptionsMessage(const rapidjson::Document &document)
+{
+   auto subMap = mPanel->GetSubscriptionsMap();
+   auto userID = std::string(document["user_id"].GetString());
+   auto name = std::string(document["nickname"].GetString());
+   auto picture = std::string(document["picture"].GetString());
+   subMap->AddParticipant(userID, name, picture);
+}
+
+void ConnectionMetadata::HandleDevicesMessage(const rapidjson::Document &document)
+{
+   auto subMap = mPanel->GetSubscriptionsMap();
+   auto deviceToOwnerMap = mPanel->GetDeviceToOwnerMap();
+
+   auto deviceID = std::string(document["id"].GetString());
+   auto ownerID = std::string(document["ownerId"].GetString());
+   auto serverID = std::string(document["serverId"].GetString());
+   auto captureMute = document["captureMute"].GetBool();
+   auto captureVolume = document["captureVolume"].GetInt();
+   if (serverID.empty()) {
+      deviceToOwnerMap->erase(deviceID);
+   } else {
+      deviceToOwnerMap->insert({deviceID, ownerID});
+      subMap->UpdateParticipantMute(ownerID, captureMute);
+      subMap->UpdateParticipantCaptureVolume(ownerID, captureVolume);
+   }
+}
+
+void ConnectionMetadata::HandleMetersMessage(const rapidjson::Document &document)
+{
+   if (!document.HasMember("clients") || !document.HasMember("musicians")) {
+      return;
+   }
+   if (!document["clients"].IsArray() || !document["musicians"].IsArray()) {
+      return;
+   }
+
+   auto subMap = mPanel->GetSubscriptionsMap();
+   auto deviceToOwnerMap = mPanel->GetDeviceToOwnerMap();
+
+   std::map<std::string, std::string> usersToDevice;
+   std::map<std::string, int> deviceToIndex;
+
+   //std::cout << "Meters: " << payload << std::endl;
+   auto musicians = document["musicians"].GetArray();
+   int idx = 0;
+   for (auto& v : document["clients"].GetArray()) {
+      auto device = std::string(v.GetString());
+      std::string ownerID = "";
+      if (device != "Jamulus" && device != "supernova") {
+         if (VirtualStudioPanel::IsWebrtcDevice(device)) {
+            // TODO: Skip webrtc participants for now
+            //ownerID = device.substr(4);
+            ;
+         } else {
+            auto it = deviceToOwnerMap->find(device);
+            if (it != deviceToOwnerMap->end()) {
+               ownerID = it->second;
+            }
+         }
+      }
+
+      if (!ownerID.empty()) {
+         auto val = usersToDevice[ownerID];
+         if (val.empty() || VirtualStudioPanel::IsWebrtcDevice(val)) {
+            usersToDevice[ownerID] = device;
+            deviceToIndex[device] = idx;
+         }
+      }
+
+      idx++;
+   }
+
+   for (auto& item : usersToDevice) {
+      auto ownerID = item.first;
+      auto device = item.second;
+      auto musicianIdx = deviceToIndex[device];
+      auto dbVals = musicians[musicianIdx].GetArray();
+      auto leftDbVal = dbVals[0].GetDouble();
+      auto rightDbVal = dbVals[1].GetDouble();
+      /*
+      if (VirtualStudioPanel::IsWebrtcDevice(device) && leftDbVal == -120 && rightDbVal == -120) {
+         continue;
+      }
+      */
+      float left = powf(10.0, leftDbVal/20.0);
+      float right = powf(10.0, rightDbVal/20.0);
+      subMap->UpdateParticipantMeter(ownerID, left, right);
+      subMap->UpdateParticipantDevice(ownerID, device);
+   }
+
+   for (auto& participant : subMap->GetMap()) {
+      auto device = usersToDevice[participant.first];
+      if (device.empty() || VirtualStudioPanel::IsWebrtcDevice(device)) {
+         subMap->UpdateParticipantDevice(participant.first, "");
+      }
+   }
+}
+
+void ConnectionMetadata::QueueEvent(WebsocketEvent event)
+{
+   BasicUI::CallAfter([this, event = std::move(event)]{ this->Publish(event); });
+}
+
+WebsocketEndpoint::WebsocketEndpoint(VirtualStudioPanel* panel, const std::string &uri, WSSType type)
+{
+   mPanel = panel;
+   mNextID = 0;
+   mUri = uri;
+   mType = type;
+   DisableLogging();
+   mClient.init_asio();
+   mClient.start_perpetual();
+   mClient.set_tls_init_handler(websocketpp::lib::bind(&WebsocketEndpoint::OnTlsInit));
+
+   mThread = websocketpp::lib::make_shared<boost::thread>(&WSSClient::run, &mClient);
+}
+
+WebsocketEndpoint::~WebsocketEndpoint()
+{
+   mConnectionSubscription.Reset();
+   mClient.stop_perpetual();
+
+   for (con_list::const_iterator it = mConnectionList.begin(); it != mConnectionList.end(); ++it) {
+      if (it->second->GetStatus() != "Open") {
+         // Only close open connections
+         continue;
+      }
+
+      auto connID = it->second->GetID();
+      auto handle = it->second->GetHdl();
+      std::cout << "> Closing connection " << connID << " from url " << mUri << std::endl;
+      websocketpp::lib::error_code ec;
+      mClient.close(handle, websocketpp::close::status::normal, "", ec);
+      if (ec) {
+         std::cout << "> Error closing connection " << connID << ": " << ec.message() << std::endl;
+      }
+   }
+
+   mClient.stop();
+   mThread->interrupt();
+   mThread->join();
+}
+
+websocketpp::lib::shared_ptr<SslContext> WebsocketEndpoint::OnTlsInit()
+{
+   auto ctx = websocketpp::lib::make_shared<SslContext>(boost::asio::ssl::context::sslv23);
+   return ctx;
+};
+
+void WebsocketEndpoint::DisableLogging()
+{
+   mClient.clear_access_channels(websocketpp::log::alevel::all);
+   mClient.clear_error_channels(websocketpp::log::elevel::all);
+}
+
+void WebsocketEndpoint::SetReconnect(bool reconnect)
+{
+   if (mReconnect == reconnect) {
+      return;
+   }
+   mReconnect = reconnect;
+}
+
+int WebsocketEndpoint::Connect()
+{
+   websocketpp::lib::error_code ec;
+   WSSClient::connection_ptr con = mClient.get_connection(mUri, ec);
+   if (ec) {
+      std::cout << "> Connect initialization error: " << ec.message() << std::endl;
+      return -1;
+   }
+
+   int new_id = mNextID++;
+   ConnectionMetadata::ptr metadata_ptr = websocketpp::lib::make_shared<ConnectionMetadata>(mPanel, new_id, con->get_handle(), mUri, mType);
+   mConnectionList[new_id] = metadata_ptr;
+
+   mConnectionSubscription.Reset();
+   mConnectionSubscription = metadata_ptr->Subscribe([this](const WebsocketEvent& evt) {
+      switch (evt.mType)
+      {
+      case WebsocketEvent::RECONNECT:
+         if (mReconnect) {
+            Connect();
+         }
+         break;
+      default:
+         break;
+      }
+   });
+
+   con->set_open_handler(websocketpp::lib::bind(
+      &ConnectionMetadata::OnOpen,
+      metadata_ptr,
+      &mClient,
+      websocketpp::lib::placeholders::_1
+   ));
+   con->set_fail_handler(websocketpp::lib::bind(
+      &ConnectionMetadata::OnFail,
+      metadata_ptr,
+      &mClient,
+      websocketpp::lib::placeholders::_1
+   ));
+   con->set_close_handler(websocketpp::lib::bind(
+      &ConnectionMetadata::OnClose,
+      metadata_ptr,
+      &mClient,
+      websocketpp::lib::placeholders::_1
+   ));
+   con->set_message_handler(websocketpp::lib::bind(
+      &ConnectionMetadata::OnMessage,
+      metadata_ptr,
+      websocketpp::lib::placeholders::_1,
+      websocketpp::lib::placeholders::_2
+   ));
+
+   con->append_header("Origin", "https://app.jacktrip.org");
+   mClient.connect(con);
+   return new_id;
+}
+
+void WebsocketEndpoint::Close(int id, websocketpp::close::status::value code, std::string reason)
+{
+   websocketpp::lib::error_code ec;
+
+   con_list::iterator metadata_it = mConnectionList.find(id);
+   if (metadata_it == mConnectionList.end()) {
+      std::cout << "> No connection found with id " << id << std::endl;
+      return;
+   }
+
+   mClient.close(metadata_it->second->GetHdl(), code, reason, ec);
+   if (ec) {
+      std::cout << "> Error initiating close: " << ec.message() << std::endl;
+   }
+}
+
+const ConnectionMetadata::ptr WebsocketEndpoint::GetMetadata(int id)
+{
+   con_list::const_iterator metadata_it = mConnectionList.find(id);
+   if (metadata_it == mConnectionList.end()) {
+      return ConnectionMetadata::ptr();
+   } else {
+      return metadata_it->second;
+   }
 }
 
 bool VirtualStudioPanel::IsWebrtcDevice(const std::string &device) {
@@ -2353,231 +2692,12 @@ void VirtualStudioPanel::HidePanel()
    projectWindow.Layout();
 }
 
-void VirtualStudioPanel::OnServerWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg)
+void VirtualStudioPanel::Disconnect(std::shared_ptr<WebsocketEndpoint>& endpoint)
 {
-   using namespace rapidjson;
-
-   auto payload = msg->get_payload();
-
-   Document document;
-   document.Parse(payload.c_str());
-   // Check for parse errors
-   if (document.HasParseError()) {
-      wxLogInfo("Error parsing JSON: %s", document.GetParseError());
-      return;
+   if (endpoint) {
+      endpoint->SetReconnect(false);
    }
-
-   // skip warning/alert messages passed on this socket
-   if (document.HasMember("message")) {
-      return;
-   }
-   UpdateServerName(document["name"].GetString());
-   UpdateServerStatus(document["status"].GetString());
-   std::string banner;
-   if (document.HasMember("bannerURL")) {
-      banner = document["bannerURL"].GetString();
-   }
-   UpdateServerBanner(banner);
-   //UpdateServerAdmin(document["admin"].GetBool());
-   UpdateServerSessionID(document["sessionId"].GetString());
-   UpdateServerOwnerID(document["ownerId"].GetString());
-   UpdateServerSampleRate(document["sampleRate"].GetDouble());
-   UpdateServerBroadcast(document["broadcast"].GetInt());
-   UpdateServerEnabled(document["enabled"].GetBool());
-}
-
-void VirtualStudioPanel::OnSubscriptionWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg)
-{
-   using namespace rapidjson;
-
-   auto payload = msg->get_payload();
-
-   Document document;
-   document.Parse(payload.c_str());
-   // Check for parse errors
-   if (document.HasParseError()) {
-      wxLogInfo("Error parsing JSON: %s", document.GetParseError());
-      return;
-   }
-
-   auto userID = std::string(document["user_id"].GetString());
-   auto name = std::string(document["nickname"].GetString());
-   auto picture = std::string(document["picture"].GetString());
-   mSubscriptionsMap->AddParticipant(userID, name, picture);
-}
-
-void VirtualStudioPanel::OnDeviceWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg)
-{
-   using namespace rapidjson;
-
-   auto payload = msg->get_payload();
-
-   Document document;
-   document.Parse(payload.c_str());
-   // Check for parse errors
-   if (document.HasParseError()) {
-      wxLogInfo("Error parsing JSON: %s", document.GetParseError());
-      return;
-   }
-
-   auto deviceID = std::string(document["id"].GetString());
-   auto ownerID = std::string(document["ownerId"].GetString());
-   auto serverID = std::string(document["serverId"].GetString());
-   auto captureMute = document["captureMute"].GetBool();
-   auto captureVolume = document["captureVolume"].GetInt();
-   if (serverID == mServerID) {
-      mDeviceToOwnerMap[deviceID] = ownerID;
-      mSubscriptionsMap->UpdateParticipantMute(ownerID, captureMute);
-      mSubscriptionsMap->UpdateParticipantCaptureVolume(ownerID, captureVolume);
-   } else {
-      mDeviceToOwnerMap.erase(deviceID);
-   }
-}
-
-void VirtualStudioPanel::OnMeterWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg)
-{
-   using namespace rapidjson;
-
-   auto payload = msg->get_payload();
-
-   Document document;
-   document.Parse(payload.c_str());
-   // Check for parse errors
-   if (document.HasParseError()) {
-      wxLogInfo("Error parsing JSON: %s", document.GetParseError());
-      return;
-   }
-
-   std::map<std::string, std::string> usersToDevice;
-   std::map<std::string, int> deviceToIndex;
-
-   if (document["clients"].IsArray() && document["musicians"].IsArray()) {
-      //std::cout << "Meters: " << payload << std::endl;
-      auto musicians = document["musicians"].GetArray();
-      int idx = 0;
-      for (auto& v : document["clients"].GetArray()) {
-         auto device = std::string(v.GetString());
-         std::string ownerID = "";
-         if (device != "Jamulus" && device != "supernova") {
-            if (VirtualStudioPanel::IsWebrtcDevice(device)) {
-               ownerID = device.substr(4);
-            } else {
-               auto it = mDeviceToOwnerMap.find(device);
-               if (it != mDeviceToOwnerMap.end()) {
-                  ownerID = it->second;
-               }
-            }
-         }
-
-         if (!ownerID.empty()) {
-            auto val = usersToDevice[ownerID];
-            if (val.empty() || VirtualStudioPanel::IsWebrtcDevice(val)) {
-               usersToDevice[ownerID] = device;
-               deviceToIndex[device] = idx;
-            }
-         }
-
-         idx++;
-
-         /*
-         if (!ownerID.empty()) {
-            seen[ownerID] = true;
-            auto dbVals = musicians[idx].GetArray();
-            auto leftDbVal = dbVals[0].GetDouble();
-            auto rightDbVal = dbVals[1].GetDouble();
-            float left = powf(10.0, leftDbVal/20.0);
-            float right = powf(10.0, rightDbVal/20.0);
-            mSubscriptionsMap->UpdateParticipantMeter(ownerID, left, right);
-            mSubscriptionsMap->UpdateParticipantDevice(ownerID, device);
-         }
-         idx++;
-         */
-      }
-
-      for (auto& item : usersToDevice) {
-         auto ownerID = item.first;
-         auto device = item.second;
-         auto musicianIdx = deviceToIndex[device];
-         auto dbVals = musicians[musicianIdx].GetArray();
-         auto leftDbVal = dbVals[0].GetDouble();
-         auto rightDbVal = dbVals[1].GetDouble();
-         if (VirtualStudioPanel::IsWebrtcDevice(device) && leftDbVal == -120 && rightDbVal == -120) {
-            continue;
-         }
-         float left = powf(10.0, leftDbVal/20.0);
-         float right = powf(10.0, rightDbVal/20.0);
-         mSubscriptionsMap->UpdateParticipantMeter(ownerID, left, right);
-         mSubscriptionsMap->UpdateParticipantDevice(ownerID, device);
-      }
-
-      for (auto& participant : mSubscriptionsMap->GetMap()) {
-         auto device = usersToDevice[participant.first];
-         if (device.empty()) {
-            mSubscriptionsMap->UpdateParticipantDevice(participant.first, "");
-         } else if (VirtualStudioPanel::IsWebrtcDevice(device)) {
-            auto musicianIdx = deviceToIndex[device];
-            auto dbVals = musicians[musicianIdx].GetArray();
-            auto leftDbVal = dbVals[0].GetDouble();
-            auto rightDbVal = dbVals[1].GetDouble();
-            if (leftDbVal == -120 && rightDbVal == -120) {
-               mSubscriptionsMap->UpdateParticipantDevice(participant.first, "");
-            }
-         }
-      }
-   }
-}
-
-void VirtualStudioPanel::OnWssOpen(ConnectionHdl hdl)
-{
-   std::cout << "yaaaayyy" << std::endl;
-   //std::string msg{"hello"};
-   //std::cout << "on_open: send " << msg << std::endl;
-   //client->send(hdl, msg, websocketpp::frame::opcode::text);
-}
-
-void VirtualStudioPanel::OnWssClose(ConnectionHdl hdl)
-{
-   std::cout << "noooooooooooo" << std::endl;
-   //std::string msg{"hello"};
-   //std::cout << "on_open: send " << msg << std::endl;
-   //client->send(hdl, msg, websocketpp::frame::opcode::text);
-}
-
-websocketpp::lib::shared_ptr<SslContext> VirtualStudioPanel::OnTlsInit()
-{
-   auto ctx = websocketpp::lib::make_shared<SslContext>(boost::asio::ssl::context::sslv23);
-   return ctx;
-};
-
-void VirtualStudioPanel::DisableLogging(const std::shared_ptr<WSSClient>& client)
-{
-   client->clear_access_channels(websocketpp::log::alevel::all);
-   client->clear_error_channels(websocketpp::log::elevel::all);
-}
-
-void VirtualStudioPanel::Connect(const std::shared_ptr<WSSClient>& client, std::string url)
-{
-   websocketpp::lib::error_code ec;
-   auto connection = client->get_connection(url, ec);
-   if (ec) {
-      std::cout << "error " << ec << std::endl;
-      return;
-   }
-   connection->append_header("Origin", "https://app.jacktrip.org");
-   client->connect(connection);
-}
-
-void VirtualStudioPanel::Disconnect(std::shared_ptr<WSSClient>& client, std::shared_ptr<boost::thread>& thread)
-{
-   if (client) {
-      client->stop();
-   }
-   if (thread) {
-      thread->interrupt();
-      thread->join();
-   }
-   thread.reset();
-   client.reset();
+   endpoint.reset();
 }
 
 void VirtualStudioPanel::InitializeWebsockets()
@@ -2591,105 +2711,51 @@ void VirtualStudioPanel::InitializeWebsockets()
 void VirtualStudioPanel::StopWebsockets()
 {
    StopMetersWebsocket();
-   Disconnect(mServerClient, mServerThread);
-   Disconnect(mSubscriptionsClient, mSubscriptionsThread);
-   Disconnect(mDevicesClient, mDevicesThread);
+   Disconnect(mServerClient);
+   Disconnect(mDevicesClient);
+   Disconnect(mSubscriptionsClient);
 }
 
 void VirtualStudioPanel::InitServerWebsocket()
 {
-   if (mServerClient || mServerThread) {
+   if (mServerClient || mServerID.empty() || mAccessToken.empty()) {
       return;
    }
-   mServerClient.reset(new WSSClient);
-   mServerThread.reset(new boost::thread([&]
-      {
-         DisableLogging(mServerClient);
-         mServerClient->init_asio();
-         mServerClient->start_perpetual();
-         mServerClient->set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
-         mServerClient->set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
-         mServerClient->set_close_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssClose, this, ::_1));
-         mServerClient->set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnServerWssMessage, this, ::_1, ::_2));
-         std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "?auth_code=" + mAccessToken;
-         Connect(mServerClient, url);
-
-         try {
-            mServerClient->run();
-         } catch (websocketpp::exception const & e) {
-            std::cout << e.what() << std::endl;
-         } catch (std::exception const & e) {
-            std::cout << e.what() << std::endl;
-         } catch (...) {
-            std::cout << "other exception" << std::endl;
-         }
-      }
-   ));
-   mServerThread->detach();
+   std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "?auth_code=" + mAccessToken;
+   mServerClient.reset(new WebsocketEndpoint(this, url, WSSType::SERVER));
+   mServerClient->SetReconnect(true);
+   auto id = mServerClient->Connect();
+   if (id == -1) {
+      std::cout << "Failed starting mServerClient" << std::endl;
+   }
 }
 
 void VirtualStudioPanel::InitSubscriptionsWebsocket()
 {
-   if (mSubscriptionsClient || mSubscriptionsThread) {
+   if (mSubscriptionsClient || mServerID.empty() || mAccessToken.empty()) {
       return;
    }
-   mSubscriptionsClient.reset(new WSSClient);
-   mSubscriptionsThread.reset(new boost::thread([&]
-      {
-         DisableLogging(mSubscriptionsClient);
-         mSubscriptionsClient->init_asio();
-         mSubscriptionsClient->start_perpetual();
-         mSubscriptionsClient->set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
-         mSubscriptionsClient->set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
-         mSubscriptionsClient->set_close_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssClose, this, ::_1));
-         mSubscriptionsClient->set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnSubscriptionWssMessage, this, ::_1, ::_2));
-         std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "/subscriptions?auth_code=" + mAccessToken;
-         Connect(mSubscriptionsClient, url);
-
-         try {
-            mSubscriptionsClient->run();
-         } catch (websocketpp::exception const & e) {
-            std::cout << e.what() << std::endl;
-         } catch (std::exception const & e) {
-            std::cout << e.what() << std::endl;
-         } catch (...) {
-            std::cout << "other exception" << std::endl;
-         }
-      }
-   ));
-   mSubscriptionsThread->detach();
+   std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "/subscriptions?auth_code=" + mAccessToken;
+   mSubscriptionsClient.reset(new WebsocketEndpoint(this, url, WSSType::SUBSCRIPTIONS));
+   mSubscriptionsClient->SetReconnect(true);
+   auto id = mSubscriptionsClient->Connect();
+   if (id == -1) {
+      std::cout << "Failed starting mSubscriptionsClient" << std::endl;
+   }
 }
 
 void VirtualStudioPanel::InitDevicesWebsocket()
 {
-   if (mDevicesClient || mDevicesThread) {
+   if (mDevicesClient || mServerID.empty() || mAccessToken.empty()) {
       return;
    }
-   mDevicesClient.reset(new WSSClient);
-   mDevicesThread.reset(new boost::thread([&]
-      {
-         DisableLogging(mDevicesClient);
-         mDevicesClient->init_asio();
-         mDevicesClient->start_perpetual();
-         mDevicesClient->set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
-         mDevicesClient->set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
-         mDevicesClient->set_close_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssClose, this, ::_1));
-         mDevicesClient->set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnDeviceWssMessage, this, ::_1, ::_2));
-         std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "/devices?auth_code=" + mAccessToken;
-         Connect(mDevicesClient, url);
-
-         try {
-            mDevicesClient->run();
-         } catch (websocketpp::exception const & e) {
-            std::cout << e.what() << std::endl;
-         } catch (std::exception const & e) {
-            std::cout << e.what() << std::endl;
-         } catch (...) {
-            std::cout << "other exception" << std::endl;
-         }
-      }
-   ));
-   mDevicesThread->detach();
+   std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "/devices?auth_code=" + mAccessToken;
+   mDevicesClient.reset(new WebsocketEndpoint(this, url, WSSType::DEVICES));
+   mDevicesClient->SetReconnect(true);
+   auto id = mDevicesClient->Connect();
+   if (id == -1) {
+      std::cout << "Failed starting mDevicesClient" << std::endl;
+   }
 }
 
 void VirtualStudioPanel::InitMetersWebsocket()
@@ -2698,42 +2764,22 @@ void VirtualStudioPanel::InitMetersWebsocket()
    if (!mServerEnabled || mServerStatus != "Ready" || mServerID.empty() || mServerSessionID.empty()) {
       return;
    }
-   if (mMetersClient || mMetersThread) {
+   if (mMetersClient) {
       return;
    }
-   std::cout << "InitMetersWebsocket initing" << std::endl;
-   mMetersClient.reset(new WSSClient);
-   mMetersThread.reset(new boost::thread([&]
-      {
-         mMetersClient.reset(new WSSClient);
-         DisableLogging(mMetersClient);
-         mMetersClient->init_asio();
-         mMetersClient->start_perpetual();
-         mMetersClient->set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnTlsInit));
-         mMetersClient->set_open_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssOpen, this, ::_1));
-         mMetersClient->set_close_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnWssClose, this, ::_1));
-         mMetersClient->set_message_handler(websocketpp::lib::bind(&VirtualStudioPanel::OnMeterWssMessage, this, ::_1, ::_2));
-         std::string secret = sha256("jktp-" + mServerID + "-" + mServerSessionID);
-         std::string url = "wss://" + mServerSessionID + ".jacktrip.cloud/meters?auth_code=" + secret;
-         Connect(mMetersClient, url);
-
-         try {
-            mMetersClient->run();
-         } catch (websocketpp::exception const & e) {
-            std::cout << e.what() << std::endl;
-         } catch (std::exception const & e) {
-            std::cout << e.what() << std::endl;
-         } catch (...) {
-            std::cout << "other exception" << std::endl;
-         }
-      }
-   ));
-   mMetersThread->detach();
+   std::string secret = sha256("jktp-" + mServerID + "-" + mServerSessionID);
+   std::string url = "wss://" + mServerSessionID + ".jacktrip.cloud/meters?auth_code=" + secret;
+   mMetersClient.reset(new WebsocketEndpoint(this, url, WSSType::METERS));
+   mMetersClient->SetReconnect(true);
+   auto id = mMetersClient->Connect();
+   if (id == -1) {
+      std::cout << "Failed starting mMetersClient" << std::endl;
+   }
 }
 
 void VirtualStudioPanel::StopMetersWebsocket()
 {
-   Disconnect(mMetersClient, mMetersThread);
+   Disconnect(mMetersClient);
 }
 
 void VirtualStudioPanel::FetchOwner(std::string ownerID)
@@ -2781,6 +2827,40 @@ void VirtualStudioPanel::FetchOwner(std::string ownerID)
    );
 }
 
+void VirtualStudioPanel::FetchServer()
+{
+   audacity::network_manager::Request request(kApiBaseUrl + "/api/servers/" + mServerID);
+   request.setHeader("Authorization", "Bearer " + mAccessToken);
+   request.setHeader("Content-Type", "application/json");
+   request.setHeader("Accept", "application/json");
+
+   auto response = audacity::network_manager::NetworkManager::GetInstance().doGet(request);
+   response->setRequestFinishedCallback(
+      [response, this](auto)
+      {
+         const auto httpCode = response->getHTTPCode();
+         wxLogInfo("FetchServer HTTP code: %d", httpCode);
+
+         if (httpCode != 200)
+            return;
+
+         const auto body = response->readAll<std::string>();
+
+         using namespace rapidjson;
+         Document document;
+         document.Parse(body.data(), body.size());
+
+         // Check for parse errors
+         if (document.HasParseError()) {
+            wxLogInfo("Error parsing JSON: %s", document.GetParseError());
+            return;
+         }
+
+         UpdateServerAdmin(document["admin"].GetBool());
+      }
+   );
+}
+
 void VirtualStudioPanel::DoClose()
 {
    ResetStudio();
@@ -2792,6 +2872,11 @@ void VirtualStudioPanel::DoClose()
 StudioParticipantMap* VirtualStudioPanel::GetSubscriptionsMap()
 {
    return mSubscriptionsMap;
+}
+
+std::map<std::string, std::string>* VirtualStudioPanel::GetDeviceToOwnerMap()
+{
+   return &mDeviceToOwnerMap;
 }
 
 void VirtualStudioPanel::OnJoin(const wxCommandEvent& event)
@@ -2808,6 +2893,7 @@ void VirtualStudioPanel::SetStudio(std::string serverID, std::string accessToken
    if (serverID.empty() || accessToken.empty()) {
       ResetStudio();
    } else {
+      FetchServer();
       InitializeWebsockets();
       mParticipantsList->SetProject(mProject, mServerID);
    }
@@ -2824,6 +2910,7 @@ void VirtualStudioPanel::ResetStudio()
    UpdateServerOwnerID("");
    UpdateServerSampleRate(0);
    UpdateServerBroadcast(0);
+   UpdateServerAdmin(false);
    mSubscriptionsMap->Clear();
    mParticipantsList->Reset();
 }
