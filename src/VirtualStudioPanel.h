@@ -288,6 +288,7 @@ class VirtualStudioPanel : public wxPanel
    std::shared_ptr<WebsocketEndpoint> mSubscriptionsClient{nullptr};
    std::shared_ptr<WebsocketEndpoint> mDevicesClient{nullptr};
    std::shared_ptr<WebsocketEndpoint> mMetersClient{nullptr};
+   std::shared_ptr<boost::thread> mActiveParticipantsThread{nullptr};
 
    StudioParticipantMap* mSubscriptionsMap{nullptr};
    std::map<std::string, std::string> mDeviceToOwnerMap;
@@ -346,7 +347,10 @@ private:
    void InitSubscriptionsWebsocket();
    void InitDevicesWebsocket();
    void InitMetersWebsocket();
+   void InitActiveParticipants();
    void StopMetersWebsocket();
+   void StopActiveParticipants();
    void FetchOwner(std::string ownerID);
    void FetchServer();
+   void FetchActiveServerParticipants();
 };

@@ -1279,6 +1279,7 @@ public:
       participantListContainer->Hide();
       mParticipantListContainer = participantListContainer;
 
+      /*
       auto addEffect = safenew ThemedAButtonWrapper<AButton>(this, wxID_ANY);
       addEffect->SetImageIndices(0,
             bmpHButtonNormal,
@@ -1292,6 +1293,7 @@ public:
       addEffect->SetForegroundColorIndex(clrTrackPanelText);
       addEffect->Bind(wxEVT_BUTTON, &VirtualStudioParticipantListWindow::OnAddEffectClicked, this);
       mAddEffect = addEffect;
+      */
 
       auto participantsHint = safenew ThemedWindowWrapper<wxStaticText>(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxST_NO_AUTORESIZE);
       //Workaround: text is set in the OnSizeChange
@@ -1322,7 +1324,7 @@ public:
 
       rootSizer->Add(participantsTitle, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 4);
       rootSizer->Add(participantListContainer, 0, wxEXPAND | wxBOTTOM, 0);
-      rootSizer->Add(addEffect, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 20);
+      //rootSizer->Add(addEffect, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 20);
       rootSizer->Add(participantsHint, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 20);
       rootSizer->Add(studioLink, 0, wxLEFT | wxRIGHT | wxEXPAND, 20);
 
@@ -1639,16 +1641,9 @@ public:
          }
       }
 
-      if (isEmpty) {
-         mParticipantListContainer->Hide();
-      } else {
-         //mAddEffect->SetEnabled(true);
-         //Workaround for GTK: Underlying GTK widget does not update
-         //its size when wxWindow size is set to zero
-         mParticipantListContainer->Show(true);
-         mParticipantsHint->Show(false);
-         mStudioLink->Show(false);
-      }
+      mParticipantListContainer->Show(!isEmpty);
+      mParticipantsHint->Show(isEmpty);
+      mStudioLink->Show(isEmpty);
 
       SendSizeEventToParent();
    }
@@ -2184,18 +2179,13 @@ void ConnectionMetadata::HandleMetersMessage(const rapidjson::Document &document
       auto device = std::string(v.GetString());
       std::string ownerID = "";
       if (device != "Jamulus" && device != "supernova") {
-         if (VirtualStudioPanel::IsWebrtcDevice(device)) {
-            // TODO: Skip webrtc participants for now
-            //ownerID = device.substr(4);
-            ;
-         } else {
-            auto it = deviceToOwnerMap->find(device);
-            if (it != deviceToOwnerMap->end()) {
-               ownerID = it->second;
-            }
+         auto it = deviceToOwnerMap->find(device);
+         if (it != deviceToOwnerMap->end()) {
+            ownerID = it->second;
          }
       }
 
+      // there could be both a webrtc connection and a device belonging to the same user; prioritize the device
       if (!ownerID.empty()) {
          auto val = usersToDevice[ownerID];
          if (val.empty() || VirtualStudioPanel::IsWebrtcDevice(val)) {
@@ -2214,11 +2204,6 @@ void ConnectionMetadata::HandleMetersMessage(const rapidjson::Document &document
       auto dbVals = musicians[musicianIdx].GetArray();
       auto leftDbVal = dbVals[0].GetDouble();
       auto rightDbVal = dbVals[1].GetDouble();
-      /*
-      if (VirtualStudioPanel::IsWebrtcDevice(device) && leftDbVal == -120 && rightDbVal == -120) {
-         continue;
-      }
-      */
       float left = powf(10.0, leftDbVal/20.0);
       float right = powf(10.0, rightDbVal/20.0);
       subMap->UpdateParticipantMeter(ownerID, left, right);
@@ -2227,7 +2212,7 @@ void ConnectionMetadata::HandleMetersMessage(const rapidjson::Document &document
 
    for (auto& participant : subMap->GetMap()) {
       auto device = usersToDevice[participant.first];
-      if (device.empty() || VirtualStudioPanel::IsWebrtcDevice(device)) {
+      if (device.empty()) {
          subMap->UpdateParticipantDevice(participant.first, "");
       }
    }
@@ -2528,8 +2513,10 @@ void VirtualStudioPanel::UpdateServerStatus(std::string status)
    mStudioStatus->SetLabel(status);
    if (status == "Ready") {
       InitMetersWebsocket();
+      InitActiveParticipants();
    } else {
       StopMetersWebsocket();
+      StopActiveParticipants();
    }
 }
 
@@ -2557,8 +2544,10 @@ void VirtualStudioPanel::UpdateServerSessionID(std::string sessionID)
    mServerSessionID = sessionID;
    if (!sessionID.empty()) {
       InitMetersWebsocket();
+      InitActiveParticipants();
    } else {
       StopMetersWebsocket();
+      StopActiveParticipants();
    }
 }
 
@@ -2580,9 +2569,11 @@ void VirtualStudioPanel::UpdateServerEnabled(bool enabled) {
    mServerEnabled = enabled;
    if (enabled) {
       InitMetersWebsocket();
+      InitActiveParticipants();
       mStudioOnline->PushDown();
    } else {
       StopMetersWebsocket();
+      StopActiveParticipants();
       mStudioOnline->PopUp();
 
    }
@@ -2706,11 +2697,13 @@ void VirtualStudioPanel::InitializeWebsockets()
    InitSubscriptionsWebsocket();
    InitDevicesWebsocket();
    InitMetersWebsocket();
+   InitActiveParticipants();
 }
 
 void VirtualStudioPanel::StopWebsockets()
 {
    StopMetersWebsocket();
+   StopActiveParticipants();
    Disconnect(mServerClient);
    Disconnect(mDevicesClient);
    Disconnect(mSubscriptionsClient);
@@ -2758,9 +2751,36 @@ void VirtualStudioPanel::InitDevicesWebsocket()
    }
 }
 
+void VirtualStudioPanel::InitActiveParticipants()
+{
+   if (!mServerEnabled || mServerStatus != "Ready" || mServerID.empty() || mServerSessionID.empty()) {
+      return;
+   }
+   if (mActiveParticipantsThread) {
+      return;
+   }
+   mActiveParticipantsThread.reset(new boost::thread([&]
+      {
+         while (mServerEnabled && mServerStatus == "Ready" && !mServerID.empty() && !mAccessToken.empty()) {
+            FetchActiveServerParticipants();
+            std::this_thread::sleep_for(std::chrono::seconds(3));
+         }
+      }
+   ));
+   mActiveParticipantsThread->detach();
+}
+
+void VirtualStudioPanel::StopActiveParticipants()
+{
+   if (mActiveParticipantsThread) {
+      mActiveParticipantsThread->interrupt();
+      mActiveParticipantsThread->join();
+   }
+   mActiveParticipantsThread.reset();
+}
+
 void VirtualStudioPanel::InitMetersWebsocket()
 {
-   std::cout << "InitMetersWebsocket called" << std::endl;
    if (!mServerEnabled || mServerStatus != "Ready" || mServerID.empty() || mServerSessionID.empty()) {
       return;
    }
@@ -2857,6 +2877,89 @@ void VirtualStudioPanel::FetchServer()
          }
 
          UpdateServerAdmin(document["admin"].GetBool());
+      }
+   );
+}
+
+void VirtualStudioPanel::FetchActiveServerParticipants()
+{
+   if (!mServerEnabled || mServerStatus != "Ready" || mServerID.empty() || mAccessToken.empty()) {
+      return;
+   }
+
+   audacity::network_manager::Request request(kApiBaseUrl + "/api/servers/" + mServerID + "/participants");
+   request.setHeader("Authorization", "Bearer " + mAccessToken);
+   request.setHeader("Content-Type", "application/json");
+   request.setHeader("Accept", "application/json");
+
+   auto response = audacity::network_manager::NetworkManager::GetInstance().doGet(request);
+   response->setRequestFinishedCallback(
+      [response, this](auto)
+      {
+         const auto httpCode = response->getHTTPCode();
+         wxLogInfo("FetchActiveServerParticipants HTTP code: %d", httpCode);
+
+         if (httpCode != 200)
+            return;
+
+         const auto body = response->readAll<std::string>();
+         //std::cout << "Body: " << body << std::endl;
+
+         using namespace rapidjson;
+         Document document;
+         document.Parse(body.data(), body.size());
+
+         // Check for parse errors
+         if (document.HasParseError()) {
+            wxLogInfo("Error parsing JSON: %s", document.GetParseError());
+            return;
+         }
+
+         std::map<std::string, bool> activeParticipants;
+
+         // Iterate over the array of objects
+         Value::ConstValueIterator itr;
+         for (itr = document.Begin(); itr != document.End(); ++itr) {
+            auto uid = std::string(itr->GetObject()["user_id"].GetString());
+            //std::cout << "Found " << uid << std::endl;
+            if (!uid.empty()) {
+               activeParticipants[uid] = true;
+            }
+         }
+
+         // TODO: Would be good to use locks around mDeviceToOwnerMap here too...
+         std::map<std::string, bool> toRemove;
+         for (auto& currItem : mDeviceToOwnerMap) {
+            auto device = currItem.first;
+            if (VirtualStudioPanel::IsWebrtcDevice(device)) {
+               auto userID = device.substr(4);
+               if (!activeParticipants[userID]) {
+                  //std::cout << "Adding " << device << " to remove list" << std::endl;
+                  toRemove[device] = true;
+               }
+            }
+         }
+
+         // do removal
+         //std::cout << "toRemove size " << toRemove.size() << std::endl;
+         for (auto& removeItem : toRemove) {
+            if (removeItem.second) {
+               auto device = removeItem.first;
+               auto userID = device.substr(4);
+               //std::cout << "Removing " << device << std::endl;
+               mDeviceToOwnerMap.erase(device);
+               mSubscriptionsMap->UpdateParticipantDevice(userID, "");
+            }
+         }
+
+         // do addition
+         //std::cout << "activeParticipants size " << activeParticipants.size() << std::endl;
+         for (auto& newItem : activeParticipants) {
+            if (newItem.second) {
+               //std::cout << "Adding " << newItem.first << std::endl;
+               mDeviceToOwnerMap["rtc-" + newItem.first] = newItem.first;
+            }
+         }
       }
    );
 }

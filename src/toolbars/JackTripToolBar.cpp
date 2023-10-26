@@ -1290,7 +1290,7 @@ void JackTripToolBar::OnPanel(wxCommandEvent& event)
    if (panel.IsShown()) {
       panel.HidePanel();
    } else {
-      panel.ShowPanel("e0a1369c-3f4f-4d46-821d-69ea7139095c", "", true);
+      panel.ShowPanel("7b787ead-e64b-4535-9477-a8f38a387489", "", true);
    }
 }
 
