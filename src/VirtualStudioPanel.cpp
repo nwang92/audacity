@@ -859,6 +859,16 @@ namespace
          muteButton->SetBackgroundColorIndex(clrEffectListItemBackground);
          muteButton->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
             if (mParticipant) {
+               auto device = mParticipant->GetDeviceID();
+               if (device.empty() || VirtualStudioPanel::IsWebrtcDevice(device)) {
+                  wxTheApp->CallAfter([] {BasicUI::ShowErrorDialog( {},
+                                  XC("Unsupported Action", "Virtual Studio"),
+                                  XC("Cannot mute WebRTC participants.", "Virtual Studio"),
+                                  wxString(),
+                                  BasicUI::ErrorDialogOptions{ BasicUI::ErrorDialogType::ModalErrorReport });
+                               });
+                  return;
+               }
                mParticipant->SetMute(!mParticipant->GetMute());
                mParticipant->SyncDeviceAPI();
             }
@@ -889,6 +899,16 @@ namespace
          volumeSlider->SetLabel(_("Input Volume"));
          volumeSlider->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
             if (mParticipant && mVolumeSlider) {
+               auto device = mParticipant->GetDeviceID();
+               if (device.empty() || VirtualStudioPanel::IsWebrtcDevice(device)) {
+                  wxTheApp->CallAfter([] {BasicUI::ShowErrorDialog( {},
+                                  XC("Unsupported Action", "Virtual Studio"),
+                                  XC("Cannot change WebRTC participants volume.", "Virtual Studio"),
+                                  wxString(),
+                                  BasicUI::ErrorDialogOptions{ BasicUI::ErrorDialogType::ModalErrorReport });
+                               });
+                  return;
+               }
                float val = mVolumeSlider->Get()*100;
                int valInt = (int)val;
                mParticipant->SetCaptureVolume(valInt);
@@ -1016,6 +1036,7 @@ namespace
          });
 
          if (mParticipant != nullptr) {
+            auto device = mParticipant->GetDeviceID();
             auto name = mParticipant->GetName();
             if (mParticipantName) {
                mParticipantName->SetLabel(name);
@@ -1025,19 +1046,28 @@ namespace
                mEnableButton->SetImages(img, img, img, img, img);
             }
             if (mMuteButton) {
-               if (mParticipant->GetMute()) {
-                  mMuteButton->PushDown();
-                  mMuteButton->SetBackgroundColour(theTheme.Colour(clrMeterInputLightPen));
+               if (VirtualStudioPanel::IsWebrtcDevice(device)) {
+                  mMuteButton->Disable();
                } else {
-                  mMuteButton->PopUp();
-                  mMuteButton->SetBackgroundColour(theTheme.Colour(clrEffectListItemBackground));
+                  mMuteButton->Enable();
+                  if (mParticipant->GetMute()) {
+                     mMuteButton->PushDown();
+                     mMuteButton->SetBackgroundColour(theTheme.Colour(clrMeterInputLightPen));
+                  } else {
+                     mMuteButton->PopUp();
+                     mMuteButton->SetBackgroundColour(theTheme.Colour(clrEffectListItemBackground));
+                  }
                }
             }
             if (mVolumeSlider) {
-               mVolumeSlider->Set(mParticipant->GetCaptureVolume());
+               if (VirtualStudioPanel::IsWebrtcDevice(device)) {
+                  mVolumeSlider->Enable(false);
+               } else {
+                  mVolumeSlider->Enable(true);
+                  mVolumeSlider->Set(mParticipant->GetCaptureVolume());
+               }
             }
             if (!showHidden) {
-               auto device = mParticipant->GetDeviceID();
                {
                   this->Show(!device.empty());
                   Update();
@@ -2011,6 +2041,10 @@ void StudioParticipantMap::Print()
    };
 }
 
+bool VirtualStudioPanel::IsWebrtcDevice(const std::string &device) {
+   return device.rfind("rtc-") == 0;
+}
+
 VirtualStudioPanel &VirtualStudioPanel::Get(AudacityProject &project)
 {
    return GetAttachedWindows(project).Get<VirtualStudioPanel>(sKey);
@@ -2031,6 +2065,7 @@ VirtualStudioPanel::VirtualStudioPanel(
       , mPrefsListenerHelper(std::make_unique<PrefsListenerHelper>(project))
 {
    mDeviceToOwnerMap.clear();
+   mWebrtcUsers.clear();
    mSubscriptionsMap = safenew StudioParticipantMap(this);
 
    auto vSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
@@ -2231,6 +2266,10 @@ void VirtualStudioPanel::SyncDeviceAPI(std::string deviceID, bool mute, int capt
    if (mServerID.empty() || mAccessToken.empty() || deviceID.empty()) {
       return;
    }
+   std::cout << "Device: " << deviceID << std::endl;
+   if (VirtualStudioPanel::IsWebrtcDevice(deviceID)) {
+      return;
+   }
 
    // generate payload
    rapidjson::Document document;
@@ -2408,19 +2447,19 @@ void VirtualStudioPanel::OnMeterWssMessage(ConnectionHdl hdl, websocketpp::confi
       return;
    }
 
-   std::map<std::string, bool> seen;
+   std::map<std::string, std::string> usersToDevice;
+   std::map<std::string, int> deviceToIndex;
 
    if (document["clients"].IsArray() && document["musicians"].IsArray()) {
+      //std::cout << "Meters: " << payload << std::endl;
       auto musicians = document["musicians"].GetArray();
       int idx = 0;
       for (auto& v : document["clients"].GetArray()) {
          auto device = std::string(v.GetString());
          std::string ownerID = "";
          if (device != "Jamulus" && device != "supernova") {
-            if (device.rfind("rtc-") == 0) {
-               // TODO: Support webrtc client
-               //ownerID = device.substr(4);
-               ;
+            if (VirtualStudioPanel::IsWebrtcDevice(device)) {
+               ownerID = device.substr(4);
             } else {
                auto it = mDeviceToOwnerMap.find(device);
                if (it != mDeviceToOwnerMap.end()) {
@@ -2429,6 +2468,17 @@ void VirtualStudioPanel::OnMeterWssMessage(ConnectionHdl hdl, websocketpp::confi
             }
          }
 
+         if (!ownerID.empty()) {
+            auto val = usersToDevice[ownerID];
+            if (val.empty() || VirtualStudioPanel::IsWebrtcDevice(val)) {
+               usersToDevice[ownerID] = device;
+               deviceToIndex[device] = idx;
+            }
+         }
+
+         idx++;
+
+         /*
          if (!ownerID.empty()) {
             seen[ownerID] = true;
             auto dbVals = musicians[idx].GetArray();
@@ -2440,12 +2490,38 @@ void VirtualStudioPanel::OnMeterWssMessage(ConnectionHdl hdl, websocketpp::confi
             mSubscriptionsMap->UpdateParticipantDevice(ownerID, device);
          }
          idx++;
+         */
       }
-   }
 
-   for (auto& participant : mSubscriptionsMap->GetMap()) {
-      if (!seen[participant.first]) {
-         mSubscriptionsMap->UpdateParticipantDevice(participant.first, "");
+      for (auto& item : usersToDevice) {
+         auto ownerID = item.first;
+         auto device = item.second;
+         auto musicianIdx = deviceToIndex[device];
+         auto dbVals = musicians[musicianIdx].GetArray();
+         auto leftDbVal = dbVals[0].GetDouble();
+         auto rightDbVal = dbVals[1].GetDouble();
+         if (VirtualStudioPanel::IsWebrtcDevice(device) && leftDbVal == -120 && rightDbVal == -120) {
+            continue;
+         }
+         float left = powf(10.0, leftDbVal/20.0);
+         float right = powf(10.0, rightDbVal/20.0);
+         mSubscriptionsMap->UpdateParticipantMeter(ownerID, left, right);
+         mSubscriptionsMap->UpdateParticipantDevice(ownerID, device);
+      }
+
+      for (auto& participant : mSubscriptionsMap->GetMap()) {
+         auto device = usersToDevice[participant.first];
+         if (device.empty()) {
+            mSubscriptionsMap->UpdateParticipantDevice(participant.first, "");
+         } else if (VirtualStudioPanel::IsWebrtcDevice(device)) {
+            auto musicianIdx = deviceToIndex[device];
+            auto dbVals = musicians[musicianIdx].GetArray();
+            auto leftDbVal = dbVals[0].GetDouble();
+            auto rightDbVal = dbVals[1].GetDouble();
+            if (leftDbVal == -120 && rightDbVal == -120) {
+               mSubscriptionsMap->UpdateParticipantDevice(participant.first, "");
+            }
+         }
       }
    }
 }
@@ -2708,6 +2784,7 @@ void VirtualStudioPanel::DoClose()
 {
    ResetStudio();
    mDeviceToOwnerMap.clear();
+   mWebrtcUsers.clear();
    Close();
 }
 

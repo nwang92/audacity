@@ -212,6 +212,7 @@ class VirtualStudioPanel : public wxPanel
 
    StudioParticipantMap* mSubscriptionsMap{nullptr};
    std::map<std::string, std::string> mDeviceToOwnerMap;
+   std::map<std::string, bool> mWebrtcUsers;
 
    // VirtualStudioPanel is wrapped using ThemedWindowWrapper,
    // so we cannot subscribe to Prefs directly
@@ -219,6 +220,8 @@ class VirtualStudioPanel : public wxPanel
    std::unique_ptr<PrefsListenerHelper> mPrefsListenerHelper;
 
 public:
+   static bool IsWebrtcDevice(const std::string &device);
+
    static VirtualStudioPanel &Get(AudacityProject &project);
    static const VirtualStudioPanel &Get(const AudacityProject &project);
 
