@@ -57,6 +57,11 @@
 #include "WindowAccessible.h"
 #endif
 
+// wut https://github.com/Tencent/rapidjson/issues/1448
+#ifdef _MSC_VER
+#undef GetObject
+#endif
+
 namespace
 {
 
@@ -857,20 +862,11 @@ namespace
          muteButton->SetButtonToggles(true);
          muteButton->SetBackgroundColorIndex(clrEffectListItemBackground);
          muteButton->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
-            if (mParticipant) {
-               auto device = mParticipant->GetDeviceID();
-               if (device.empty() || VirtualStudioPanel::IsWebrtcDevice(device)) {
-                  wxTheApp->CallAfter([] {BasicUI::ShowErrorDialog( {},
-                                  XC("Unsupported Action", "Virtual Studio"),
-                                  XC("Cannot mute WebRTC participants.", "Virtual Studio"),
-                                  wxString(),
-                                  BasicUI::ErrorDialogOptions{ BasicUI::ErrorDialogType::ModalErrorReport });
-                               });
-                  return;
-               }
-               mParticipant->SetMute(!mParticipant->GetMute());
-               mParticipant->SyncDeviceAPI();
+            if (!mParticipant) {
+               return;
             }
+            mParticipant->SetMute(!mParticipant->GetMute());
+            mParticipant->SyncDeviceAPI();
          });
          mMuteButton = muteButton;
 
@@ -882,12 +878,11 @@ namespace
             wxDefaultSize,
             ASlider::Options{}
                .Style( PERCENT_SLIDER )
-               // 20 steps using page up/down, and 60 using arrow keys
-               .Line( 0.05f )
-               .Page( 0.05f )
+               .Line( 5.0f )
+               .Page( 5.0f )
+               .Popup(false)
                .DrawTicks(true)
                .StepValue(0.05f)
-               //.ShowLabels(false)
          );
          //auto sz = bottomSizer->GetSize();
          //wxSize sz = GetSize();
@@ -896,23 +891,15 @@ namespace
          volumeSlider->SetMinSize(wxSize(120, 20));
          volumeSlider->Set(1);
          volumeSlider->SetLabel(_("Input Volume"));
+         volumeSlider->SetBackgroundColour(theTheme.Colour(clrMedium));
          volumeSlider->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
-            if (mParticipant && mVolumeSlider) {
-               auto device = mParticipant->GetDeviceID();
-               if (device.empty() || VirtualStudioPanel::IsWebrtcDevice(device)) {
-                  wxTheApp->CallAfter([] {BasicUI::ShowErrorDialog( {},
-                                  XC("Unsupported Action", "Virtual Studio"),
-                                  XC("Cannot change WebRTC participants volume.", "Virtual Studio"),
-                                  wxString(),
-                                  BasicUI::ErrorDialogOptions{ BasicUI::ErrorDialogType::ModalErrorReport });
-                               });
-                  return;
-               }
-               float val = mVolumeSlider->Get()*100;
-               int valInt = (int)val;
-               mParticipant->SetCaptureVolume(valInt);
-               mParticipant->SyncDeviceAPI();
+            if (!mParticipant) {
+               return;
             }
+            float val = mVolumeSlider->Get()*100;
+            int valInt = (int)val;
+            mParticipant->SetCaptureVolume(valInt);
+            mParticipant->SyncDeviceAPI();
          });
          mVolumeSlider = volumeSlider;
 
@@ -1000,10 +987,8 @@ namespace
                if (this->IsShown() && mParticipant->GetID() == evt.mUid && mMuteButton) {
                   if (mParticipant->GetMute()) {
                      mMuteButton->PushDown();
-                     //mMuteButton->SetBackgroundColour(theTheme.Colour(clrMeterInputLightPen));
                   } else {
                      mMuteButton->PopUp();
-                     //mMuteButton->SetBackgroundColour(theTheme.Colour(clrEffectListItemBackground));
                   }
                }
                break;
@@ -1044,26 +1029,29 @@ namespace
             if (mEnableButton) {
                mEnableButton->SetImages(img, img, img, img, img);
             }
+            auto canChange = mParticipant->CanModify();
             if (mMuteButton) {
-               if (VirtualStudioPanel::IsWebrtcDevice(device)) {
-                  mMuteButton->Disable();
-               } else {
+               if (canChange) {
+                  mMuteButton->SetBackgroundColour(theTheme.Colour(clrEffectListItemBackground));
                   mMuteButton->Enable();
                   if (mParticipant->GetMute()) {
                      mMuteButton->PushDown();
-                     //mMuteButton->SetBackgroundColour(theTheme.Colour(clrMeterInputLightPen));
                   } else {
                      mMuteButton->PopUp();
-                     //mMuteButton->SetBackgroundColour(theTheme.Colour(clrEffectListItemBackground));
                   }
+               } else {
+                  mMuteButton->SetBackgroundColour(theTheme.Colour(clrMeterInputLightPen));
+                  mMuteButton->Disable();
                }
             }
             if (mVolumeSlider) {
-               if (VirtualStudioPanel::IsWebrtcDevice(device)) {
-                  mVolumeSlider->Enable(false);
-               } else {
+               if (canChange) {
+                  mVolumeSlider->SetBackgroundColour(theTheme.Colour(clrEffectListItemBackground));
                   mVolumeSlider->Enable(true);
                   mVolumeSlider->Set(mParticipant->GetCaptureVolume());
+               } else {
+                  mVolumeSlider->SetBackgroundColour(theTheme.Colour(clrMeterInputLightPen));
+                  mVolumeSlider->Enable(false);
                }
             }
             if (!showHidden) {
@@ -1740,12 +1728,13 @@ AttachedWindows::RegisteredFactory sKey{
 };
 }
 
-StudioParticipant::StudioParticipant(wxWindow* parent, std::string id, std::string name, std::string picture)
+StudioParticipant::StudioParticipant(wxWindow* parent, const std::string &id, const std::string &name, const std::string &picture, bool canModify)
 {
    mParent = parent;
    mID = id;
    mName = name;
    mPicture = picture;
+   mModify = canModify;
    mLeftVolume = 0;
    mRightVolume = 0;
    mDeviceID = "";
@@ -1786,6 +1775,12 @@ wxImage StudioParticipant::GetImage()
 std::string StudioParticipant::GetDeviceID()
 {
    return mDeviceID;
+}
+
+bool StudioParticipant::CanModify()
+{
+   // TODO: We should be able to support modifying webrtc devices with some more API work...
+   return mModify && !mDeviceID.empty() && !VirtualStudioPanel::IsWebrtcDevice(mDeviceID);
 }
 
 bool StudioParticipant::GetMute()
@@ -1843,13 +1838,21 @@ bool StudioParticipant::SetDeviceID(std::string deviceID)
 
 bool StudioParticipant::SetMute(bool mute)
 {
-
    if (mMute == mute) {
       return false;
    }
    mMute = mute;
    QueueEvent({ ParticipantEvent::MUTE_CHANGE, mID });
    return true;
+}
+
+void StudioParticipant::SetModify(bool mod)
+{
+   if (mModify == mod) {
+      return;
+   }
+   mModify = mod;
+   QueueEvent({ ParticipantEvent::MODIFY_CHANGE, mID });
 }
 
 void StudioParticipant::SyncDeviceAPI()
@@ -1970,12 +1973,12 @@ std::shared_ptr<StudioParticipant> StudioParticipantMap::GetParticipantByID(std:
    return mMap[id];
 }
 
-void StudioParticipantMap::AddParticipant(std::string id, std::string name, std::string picture)
+void StudioParticipantMap::AddParticipant(const std::string &id, const std::string &name, const std::string &picture, bool canModify)
 {
    if (auto participant = mMap[id]) {
       return;
    }
-   auto p = std::make_shared<StudioParticipant>(mParent, id, name, picture);
+   auto p = std::make_shared<StudioParticipant>(mParent, id, name, picture, canModify);
    mMap[id] = p;
    QueueEvent({ ParticipantEvent::REFRESH, id });
 }
@@ -2085,7 +2088,6 @@ void ConnectionMetadata::OnClose(WSSClient* client, ConnectionHdl hdl)
 
 void ConnectionMetadata::OnMessage(ConnectionHdl hdl, WSSClient::message_ptr msg)
 {
-   using namespace rapidjson;
    auto payload = msg->get_payload();
 
    rapidjson::Document document;
@@ -2131,11 +2133,10 @@ void ConnectionMetadata::HandleServerMessage(const rapidjson::Document &document
 
 void ConnectionMetadata::HandleSubscriptionsMessage(const rapidjson::Document &document)
 {
-   auto subMap = mPanel->GetSubscriptionsMap();
    auto userID = std::string(document["user_id"].GetString());
    auto name = std::string(document["nickname"].GetString());
    auto picture = std::string(document["picture"].GetString());
-   subMap->AddParticipant(userID, name, picture);
+   mPanel->AddParticipant(userID, name, picture);
 }
 
 void ConnectionMetadata::HandleDevicesMessage(const rapidjson::Document &document)
@@ -2593,7 +2594,13 @@ void VirtualStudioPanel::UpdateServerBroadcast(int broadcast) {
    mServerBroadcast = broadcast;
 }
 
-void VirtualStudioPanel::SyncDeviceAPI(std::string deviceID, bool mute, int captureVolume) {
+void VirtualStudioPanel::AddParticipant(const std::string &userID, const std::string &name, const std::string &picture) {
+   if (mSubscriptionsMap) {
+      mSubscriptionsMap->AddParticipant(userID, name, picture, mServerAdmin || mUserID == userID);
+   }
+}
+
+void VirtualStudioPanel::SyncDeviceAPI(const std::string &deviceID, bool mute, int captureVolume) {
    if (mServerID.empty() || mAccessToken.empty() || deviceID.empty()) {
       return;
    }
@@ -2638,9 +2645,9 @@ void VirtualStudioPanel::SyncDeviceAPI(std::string deviceID, bool mute, int capt
    );
 }
 
-void VirtualStudioPanel::ShowPanel(std::string serverID, std::string accessToken, bool focus)
+void VirtualStudioPanel::ShowPanel(const std::string &serverID, const std::string &userID, const std::string &accessToken, bool focus)
 {
-   if (serverID.empty() || accessToken.empty()) {
+   if (serverID.empty() || userID.empty() || accessToken.empty()) {
       ResetStudio();
       return;
    }
@@ -2648,8 +2655,9 @@ void VirtualStudioPanel::ShowPanel(std::string serverID, std::string accessToken
    wxWindowUpdateLocker freeze(this);
 
    mServerID = serverID;
+   mUserID = userID;
    mAccessToken = accessToken;
-   SetStudio(mServerID, mAccessToken);
+   SetStudio();
 
    auto &projectWindow = ProjectWindow::Get(mProject);
    const auto pContainerWindow = projectWindow.GetContainerWindow();
@@ -2693,6 +2701,9 @@ void VirtualStudioPanel::Disconnect(std::shared_ptr<WebsocketEndpoint>& endpoint
 
 void VirtualStudioPanel::InitializeWebsockets()
 {
+   if (!mSetupDone) {
+      return;
+   }
    InitServerWebsocket();
    InitSubscriptionsWebsocket();
    InitDevicesWebsocket();
@@ -2821,8 +2832,7 @@ void VirtualStudioPanel::FetchOwner(std::string ownerID)
 
          const auto body = response->readAll<std::string>();
 
-         using namespace rapidjson;
-         Document document;
+         rapidjson::Document document;
          document.Parse(body.data(), body.size());
 
          // Check for parse errors
@@ -2842,9 +2852,18 @@ void VirtualStudioPanel::FetchOwner(std::string ownerID)
             }
          }
          auto picture = std::string(document["picture"].GetString());
-         mSubscriptionsMap->AddParticipant(userID, name, picture);
+         AddParticipant(userID, name, picture);
       }
    );
+}
+
+void VirtualStudioPanel::PopulatePanel()
+{
+   if (!mSetupDone || mServerID.empty()) {
+      return;
+   }
+   InitializeWebsockets();
+   mParticipantsList->SetProject(mProject, mServerID);
 }
 
 void VirtualStudioPanel::FetchServer()
@@ -2861,13 +2880,15 @@ void VirtualStudioPanel::FetchServer()
          const auto httpCode = response->getHTTPCode();
          wxLogInfo("FetchServer HTTP code: %d", httpCode);
 
-         if (httpCode != 200)
+         if (httpCode != 200) {
+            UpdateServerName("ERROR");
+            UpdateServerStatus("Close and try again");
             return;
+         }
 
          const auto body = response->readAll<std::string>();
 
-         using namespace rapidjson;
-         Document document;
+         rapidjson::Document document;
          document.Parse(body.data(), body.size());
 
          // Check for parse errors
@@ -2877,6 +2898,8 @@ void VirtualStudioPanel::FetchServer()
          }
 
          UpdateServerAdmin(document["admin"].GetBool());
+         mSetupDone = true;
+         PopulatePanel();
       }
    );
 }
@@ -2905,8 +2928,7 @@ void VirtualStudioPanel::FetchActiveServerParticipants()
          const auto body = response->readAll<std::string>();
          //std::cout << "Body: " << body << std::endl;
 
-         using namespace rapidjson;
-         Document document;
+         rapidjson::Document document;
          document.Parse(body.data(), body.size());
 
          // Check for parse errors
@@ -2918,7 +2940,7 @@ void VirtualStudioPanel::FetchActiveServerParticipants()
          std::map<std::string, bool> activeParticipants;
 
          // Iterate over the array of objects
-         Value::ConstValueIterator itr;
+         rapidjson::Value::ConstValueIterator itr;
          for (itr = document.Begin(); itr != document.End(); ++itr) {
             auto uid = std::string(itr->GetObject()["user_id"].GetString());
             //std::cout << "Found " << uid << std::endl;
@@ -2991,14 +3013,12 @@ void VirtualStudioPanel::OnJoin(const wxCommandEvent& event)
    BasicUI::OpenInDefaultBrowser(url);
 }
 
-void VirtualStudioPanel::SetStudio(std::string serverID, std::string accessToken)
+void VirtualStudioPanel::SetStudio()
 {
-   if (serverID.empty() || accessToken.empty()) {
+   if (mServerID.empty() || mAccessToken.empty()) {
       ResetStudio();
    } else {
       FetchServer();
-      InitializeWebsockets();
-      mParticipantsList->SetProject(mProject, mServerID);
    }
 }
 
@@ -3016,6 +3036,7 @@ void VirtualStudioPanel::ResetStudio()
    UpdateServerAdmin(false);
    mSubscriptionsMap->Clear();
    mParticipantsList->Reset();
+   mSetupDone = false;
 }
 
 void VirtualStudioPanel::SetFocus()

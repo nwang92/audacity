@@ -89,6 +89,8 @@ struct ParticipantEvent
       VOLUME_CHANGE,
       // Posted when mute is changed
       MUTE_CHANGE,
+      // Posted when modify access is changed
+      MODIFY_CHANGE,
       // Posted when participant is hidden
       HIDE,
       // Posted when participant is shown
@@ -130,7 +132,7 @@ class StudioParticipant final
    : public Observer::Publisher<ParticipantEvent>
 {
 public:
-   StudioParticipant(wxWindow* parent, std::string id, std::string name, std::string picture);
+   StudioParticipant(wxWindow* parent, const std::string &id, const std::string &name, const std::string &picture, bool canModify);
    ~StudioParticipant();
 
    std::string GetID();
@@ -138,6 +140,7 @@ public:
    std::string GetPicture();
    wxImage GetImage();
    std::string GetDeviceID();
+   bool CanModify();
    float GetCaptureVolume();
    bool GetMute();
    float GetLeftVolume();
@@ -146,6 +149,7 @@ public:
    void SetCaptureVolume(int volume);
    bool SetDeviceID(std::string deviceID);
    bool SetMute(bool mute);
+   void SetModify(bool mod);
    void SyncDeviceAPI();
 
    std::string GetDownloadLocalDir();
@@ -161,6 +165,7 @@ private:
    std::string mDeviceID;
    int mCaptureVolume;
    bool mMute;
+   bool mModify;
    wxBitmap mBitmap;
    wxImage mImage;
    std::string mImageFile;
@@ -179,7 +184,7 @@ public:
 
    std::map<std::string, std::shared_ptr<StudioParticipant>> GetMap();
    std::shared_ptr<StudioParticipant> GetParticipantByID(std::string id);
-   void AddParticipant(std::string id, std::string name, std::string picture);
+   void AddParticipant(const std::string &id, const std::string &name, const std::string &picture, bool canModify);
    void UpdateParticipantMeter(std::string id, float left, float right);
    void UpdateParticipantDevice(std::string id, std::string device);
    void UpdateParticipantCaptureVolume(std::string id, int volume);
@@ -271,8 +276,10 @@ class VirtualStudioPanel : public wxPanel
    wxWindow* mHeader{nullptr};
    wxWindow* mActions{nullptr};
    AudacityProject& mProject;
+   bool mSetupDone = false;
 
    std::string mServerID;
+   std::string mUserID;
    std::string mAccessToken;
    std::string mServerName;
    std::string mServerBanner;
@@ -281,8 +288,8 @@ class VirtualStudioPanel : public wxPanel
    std::string mServerStatus;
    int mServerBroadcast = 0;
    double mServerSampleRate = 0;
-   bool mServerEnabled = 0;
-   bool mServerAdmin = 0;
+   bool mServerEnabled = false;
+   bool mServerAdmin = false;
 
    std::shared_ptr<WebsocketEndpoint> mServerClient{nullptr};
    std::shared_ptr<WebsocketEndpoint> mSubscriptionsClient{nullptr};
@@ -315,14 +322,14 @@ public:
 
    ~VirtualStudioPanel() override;
 
-   void SyncDeviceAPI(std::string deviceID, bool mute, int captureVolume);
-   void ShowPanel(std::string serverID, std::string accessToken, bool focus);
+   void SyncDeviceAPI(const std::string &deviceID, bool mute, int captureVolume);
+   void ShowPanel(const std::string &serverID, const std::string &userID, const std::string &accessToken, bool focus);
    void HidePanel();
    void DoClose();
    void OnJoin(const wxCommandEvent& event);
    StudioParticipantMap* GetSubscriptionsMap();
    std::map<std::string, std::string>* GetDeviceToOwnerMap();
-   void SetStudio(std::string serverID, std::string accessToken);
+   void SetStudio();
    void ResetStudio();
    void UpdateServerName(std::string name);
    void UpdateServerStatus(std::string status);
@@ -333,6 +340,7 @@ public:
    void UpdateServerEnabled(bool enabled);
    void UpdateServerSampleRate(double sampleRate);
    void UpdateServerBroadcast(int broadcast);
+   void AddParticipant(const std::string &userID, const std::string &name, const std::string &picture);
 
    bool IsTopNavigationDomain(NavigationKind) const override { return true; }
 
@@ -350,6 +358,7 @@ private:
    void InitActiveParticipants();
    void StopMetersWebsocket();
    void StopActiveParticipants();
+   void PopulatePanel();
    void FetchOwner(std::string ownerID);
    void FetchServer();
    void FetchActiveServerParticipants();

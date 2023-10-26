@@ -1166,7 +1166,7 @@ void JackTripToolBar::ToggleStudioPanel(std::string serverID)
    if (panel.IsShown()) {
       panel.HidePanel();
    } else {
-      panel.ShowPanel(serverID, mAccessToken, true);
+      panel.ShowPanel(serverID, mUserID, mAccessToken, true);
    }
    /*
    auto &pw = ProjectWindow::Get( mProject );
@@ -1290,7 +1290,7 @@ void JackTripToolBar::OnPanel(wxCommandEvent& event)
    if (panel.IsShown()) {
       panel.HidePanel();
    } else {
-      panel.ShowPanel("7b787ead-e64b-4535-9477-a8f38a387489", "", true);
+      panel.ShowPanel("7b787ead-e64b-4535-9477-a8f38a387489", "google-oauth2|109145711530830190463", "", true);
    }
 }
 
