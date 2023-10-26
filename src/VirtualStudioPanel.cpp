@@ -853,7 +853,7 @@ namespace
          muteButton->SetMinSize(wxSize(24, 24));
          muteButton->SetTranslatableLabel(XO("Mute"));
          muteButton->SetToolTip(XO("Mute"));
-         muteButton->SetImageIndices(0, bmpMic, bmpMic, bmpMic, bmpMic, bmpMic);
+         muteButton->SetImageIndices(0, bmpMic, bmpMic, bmpMicOff, bmpMicOff, bmpMic);
          muteButton->SetButtonToggles(true);
          muteButton->SetBackgroundColorIndex(clrEffectListItemBackground);
          muteButton->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
@@ -1000,10 +1000,10 @@ namespace
                if (this->IsShown() && mParticipant->GetID() == evt.mUid && mMuteButton) {
                   if (mParticipant->GetMute()) {
                      mMuteButton->PushDown();
-                     mMuteButton->SetBackgroundColour(theTheme.Colour(clrMeterInputLightPen));
+                     //mMuteButton->SetBackgroundColour(theTheme.Colour(clrMeterInputLightPen));
                   } else {
                      mMuteButton->PopUp();
-                     mMuteButton->SetBackgroundColour(theTheme.Colour(clrEffectListItemBackground));
+                     //mMuteButton->SetBackgroundColour(theTheme.Colour(clrEffectListItemBackground));
                   }
                }
                break;
@@ -1051,10 +1051,10 @@ namespace
                   mMuteButton->Enable();
                   if (mParticipant->GetMute()) {
                      mMuteButton->PushDown();
-                     mMuteButton->SetBackgroundColour(theTheme.Colour(clrMeterInputLightPen));
+                     //mMuteButton->SetBackgroundColour(theTheme.Colour(clrMeterInputLightPen));
                   } else {
                      mMuteButton->PopUp();
-                     mMuteButton->SetBackgroundColour(theTheme.Colour(clrEffectListItemBackground));
+                     //mMuteButton->SetBackgroundColour(theTheme.Colour(clrEffectListItemBackground));
                   }
                }
             }
