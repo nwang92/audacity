@@ -31,6 +31,7 @@
 #include "Request.h"
 #endif
 #include <rapidjson/document.h>
+#include <rapidjson/writer.h>
 
 //#include "./widgets/MeterPanel.h"
 #include "Theme.h"

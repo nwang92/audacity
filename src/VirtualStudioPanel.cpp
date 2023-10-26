@@ -51,6 +51,7 @@
 #include "menus/MenuHelper.h"
 #include "Menus.h"
 #include "prefs/EffectsPrefs.h"
+#include "widgets/ASlider.h"
 
 #if wxUSE_ACCESSIBILITY
 #include "WindowAccessible.h"
