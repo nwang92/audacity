@@ -1860,19 +1860,13 @@ void StudioParticipant::SyncDeviceAPI()
    vsp->SyncDeviceAPI(mDeviceID, mMute, mCaptureVolume);
 }
 
-std::string StudioParticipant::GetDownloadLocalDir()
-{
-   auto tempDefaultLoc = TempDirectory::DefaultTempDir();
-   return wxFileName(tempDefaultLoc, mID).GetFullPath().ToStdString();
-}
-
 void StudioParticipant::FetchImage()
 {
    if (mPicture.empty() || mPicture.rfind("http") != 0) {
       return;
    }
 
-   auto outputDir = GetDownloadLocalDir();
+   auto outputDir = VirtualStudioPanel::GetDownloadLocalDir(mID);
    if (!wxDirExists(outputDir)) {
       wxMkdir(outputDir);
    }
@@ -2009,7 +2003,6 @@ void StudioParticipantMap::UpdateParticipantMute(std::string id, bool mute)
    }
 }
 
-
 unsigned long StudioParticipantMap::GetParticipantsCount()
 {
    return mMap.size();
@@ -2122,6 +2115,7 @@ void ConnectionMetadata::HandleServerMessage(const rapidjson::Document &document
    mPanel->UpdateServerBanner(banner);
    mPanel->UpdateServerSessionID(document["sessionId"].GetString());
    mPanel->UpdateServerOwnerID(document["ownerId"].GetString());
+   mPanel->UpdateServerStreamID(document["streamId"].GetString());
    mPanel->UpdateServerSampleRate(document["sampleRate"].GetDouble());
    mPanel->UpdateServerBroadcast(document["broadcast"].GetInt());
    mPanel->UpdateServerEnabled(document["enabled"].GetBool());
@@ -2363,8 +2357,70 @@ const ConnectionMetadata::ptr WebsocketEndpoint::GetMetadata(int id)
    }
 }
 
+RecordingSegmentQueue::RecordingSegmentQueue(size_t maxLen):
+   mBufferSize(maxLen)
+{
+   Clear();
+}
+
+// destructor
+RecordingSegmentQueue::~RecordingSegmentQueue()
+{
+}
+
+void RecordingSegmentQueue::Clear()
+{
+   mStart.store(0);
+   mEnd.store(0);
+}
+
+// Add a message to the end of the queue.  Return false if the
+// queue was full.
+bool RecordingSegmentQueue::Put(const std::string &filename)
+{
+   auto start = mStart.load(std::memory_order_acquire);
+   auto end = mEnd.load(std::memory_order_relaxed);
+   // mStart can be greater than mEnd because it is all mod mBufferSize
+   assert( (end + mBufferSize - start) >= 0 );
+   int len = (end + mBufferSize - start) % mBufferSize;
+
+   // Never completely fill the queue, because then the
+   // state is ambiguous (mStart==mEnd)
+   if (len + 1 >= (int)(mBufferSize))
+      return false;
+
+   //wxLogDebug(wxT("Put: %s"), msg.toString());
+
+   mBuffer[end] = filename;
+   mEnd.store((end + 1) % mBufferSize, std::memory_order_release);
+
+   return true;
+}
+
+// Get the next message from the start of the queue.
+// Return false if the queue was empty.
+bool RecordingSegmentQueue::Get(std::string &filename)
+{
+   auto start = mStart.load(std::memory_order_relaxed);
+   auto end = mEnd.load(std::memory_order_acquire);
+   int len = (end + mBufferSize - start) % mBufferSize;
+
+   if (len == 0)
+      return false;
+
+   filename = mBuffer[start];
+   mStart.store((start + 1) % mBufferSize, std::memory_order_release);
+
+   return true;
+}
+
 bool VirtualStudioPanel::IsWebrtcDevice(const std::string &device) {
    return device.rfind("rtc-") == 0;
+}
+
+std::string VirtualStudioPanel::GetDownloadLocalDir(const std::string &uniqueID) {
+   auto tempDefaultLoc = TempDirectory::DefaultTempDir();
+   return wxFileName(tempDefaultLoc, uniqueID).GetFullPath().ToStdString();
 }
 
 VirtualStudioPanel &VirtualStudioPanel::Get(AudacityProject &project)
@@ -2384,11 +2440,13 @@ VirtualStudioPanel::VirtualStudioPanel(
    long style, const wxString& name)
       : wxPanel(parent, id, pos, size, style, name)
       , mProject(project)
+      , mQueue(1024)
       , mPrefsListenerHelper(std::make_unique<PrefsListenerHelper>(project))
 {
    mDeviceToOwnerMap.clear();
    mWebrtcUsers.clear();
    mSubscriptionsMap = safenew StudioParticipantMap(this);
+   mRecordingTimer.Bind(wxEVT_TIMER, &VirtualStudioPanel::OnNewRecordingSegment, this);
 
    auto vSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
 
@@ -2464,7 +2522,22 @@ VirtualStudioPanel::VirtualStudioPanel(
       joinButton->Bind(wxEVT_BUTTON, &VirtualStudioPanel::OnJoin, this);
       mJoinStudio = joinButton;
 
+      auto recButton = safenew ThemedAButtonWrapper<AButton>(actions, wxID_ANY);
+      recButton->SetImageIndices(0,
+            bmpHButtonNormal,
+            bmpHButtonHover,
+            bmpHButtonDown,
+            bmpHButtonHover,
+            bmpHButtonDisabled);
+      recButton->SetTranslatableLabel(XO("Record"));
+      recButton->SetButtonType(AButton::TextButton);
+      recButton->SetBackgroundColorIndex(clrMedium);
+      recButton->SetForegroundColorIndex(clrTrackPanelText);
+      recButton->Bind(wxEVT_BUTTON, &VirtualStudioPanel::OnRecord, this);
+      mRecButton = recButton;
+
       shSizer->Add(joinButton, 1, wxLEFT | wxRIGHT | wxTOP | wxEXPAND, 4);
+      shSizer->Add(recButton, 1, wxLEFT | wxRIGHT | wxTOP | wxEXPAND, 4);
       actions->SetSizer(shSizer.release());
    }
    vSizer->Add(actions, 0, wxEXPAND);
@@ -2511,9 +2584,11 @@ void VirtualStudioPanel::UpdateServerStatus(std::string status)
    if (status == "Ready") {
       InitMetersWebsocket();
       InitActiveParticipants();
+      StopRecording();
    } else {
       StopMetersWebsocket();
       StopActiveParticipants();
+      StopRecording();
    }
 }
 
@@ -2542,10 +2617,20 @@ void VirtualStudioPanel::UpdateServerSessionID(std::string sessionID)
    if (!sessionID.empty()) {
       InitMetersWebsocket();
       InitActiveParticipants();
+      StopRecording();
    } else {
       StopMetersWebsocket();
       StopActiveParticipants();
+      StopRecording();
    }
+}
+
+void VirtualStudioPanel::UpdateServerStreamID(std::string streamID)
+{
+   if (mServerStreamID == streamID) {
+      return;
+   }
+   mServerStreamID = streamID;
 }
 
 void VirtualStudioPanel::UpdateServerOwnerID(std::string ownerID)
@@ -2567,12 +2652,13 @@ void VirtualStudioPanel::UpdateServerEnabled(bool enabled) {
    if (enabled) {
       InitMetersWebsocket();
       InitActiveParticipants();
+      StopRecording();
       mStudioOnline->PushDown();
    } else {
       StopMetersWebsocket();
       StopActiveParticipants();
+      StopRecording();
       mStudioOnline->PopUp();
-
    }
 }
 
@@ -2588,12 +2674,21 @@ void VirtualStudioPanel::UpdateServerBroadcast(int broadcast) {
       return;
    }
    mServerBroadcast = broadcast;
+   if (broadcast == 0) {
+      StopRecording();
+   }
 }
 
-void VirtualStudioPanel::AddParticipant(const std::string &userID, const std::string &name, const std::string &picture) {
+void VirtualStudioPanel::AddParticipant(const std::string &userID, const std::string &name, const std::string &picture)
+{
    if (mSubscriptionsMap) {
       mSubscriptionsMap->AddParticipant(userID, name, picture, mServerAdmin || mUserID == userID);
    }
+}
+
+bool VirtualStudioPanel::ServerIsReady()
+{
+   return mServerEnabled && mServerStatus == "Ready" && !mServerID.empty() && !mServerSessionID.empty() && !mAccessToken.empty();
 }
 
 void VirtualStudioPanel::SyncDeviceAPI(const std::string &deviceID, bool mute, int captureVolume) {
@@ -2760,7 +2855,7 @@ void VirtualStudioPanel::InitDevicesWebsocket()
 
 void VirtualStudioPanel::InitActiveParticipants()
 {
-   if (!mServerEnabled || mServerStatus != "Ready" || mServerID.empty() || mServerSessionID.empty()) {
+   if (!ServerIsReady()) {
       return;
    }
    if (mActiveParticipantsThread) {
@@ -2768,13 +2863,33 @@ void VirtualStudioPanel::InitActiveParticipants()
    }
    mActiveParticipantsThread.reset(new boost::thread([&]
       {
-         while (mServerEnabled && mServerStatus == "Ready" && !mServerID.empty() && !mAccessToken.empty()) {
+         while (ServerIsReady()) {
             FetchActiveServerParticipants();
             std::this_thread::sleep_for(std::chrono::seconds(3));
          }
       }
    ));
    mActiveParticipantsThread->detach();
+}
+
+void VirtualStudioPanel::InitRecording()
+{
+   if (!ServerIsReady()) {
+      return;
+   }
+   if (mRecordingThread) {
+      return;
+   }
+   mRecordingTimer.Start(2000);
+   mRecordingThread.reset(new boost::thread([&]
+      {
+         while (ServerIsReady() && !mTrackName.IsEmpty() && mServerBroadcast > 0) {
+            FetchFullMixMediaSegments();
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+         }
+      }
+   ));
+   mRecordingThread->detach();
 }
 
 void VirtualStudioPanel::StopActiveParticipants()
@@ -2786,9 +2901,33 @@ void VirtualStudioPanel::StopActiveParticipants()
    mActiveParticipantsThread.reset();
 }
 
+void VirtualStudioPanel::StopRecording()
+{
+   mTrackName.Clear();
+   mRecordingTimer.Stop();
+   if (mRecordingThread) {
+      mRecordingThread->interrupt();
+      mRecordingThread->join();
+   }
+   mRecordingThread.reset();
+   std::string filename;
+   while (mQueue.Get(filename)) {
+      LoadSegment(filename);
+   }
+   mQueue.Clear();
+
+   if (mDownloadOutput.is_open()) {
+      mDownloadOutput.close();
+   }
+   mDownloadedMediaFiles.clear();
+   mRecTracks.clear(); // WaveTrackArray
+   mRecButton->SetLabel(XO("Record"));
+   mRecButton->SetForegroundColour(theTheme.Colour(clrTrackPanelText));
+}
+
 void VirtualStudioPanel::InitMetersWebsocket()
 {
-   if (!mServerEnabled || mServerStatus != "Ready" || mServerID.empty() || mServerSessionID.empty()) {
+   if (!ServerIsReady()) {
       return;
    }
    if (mMetersClient) {
@@ -2809,7 +2948,7 @@ void VirtualStudioPanel::StopMetersWebsocket()
    Disconnect(mMetersClient);
 }
 
-void VirtualStudioPanel::FetchOwner(std::string ownerID)
+void VirtualStudioPanel::FetchOwner(const std::string &ownerID)
 {
    audacity::network_manager::Request request(kApiBaseUrl + "/api/users/" + ownerID);
    request.setHeader("Authorization", "Bearer " + mAccessToken);
@@ -2902,7 +3041,7 @@ void VirtualStudioPanel::FetchServer()
 
 void VirtualStudioPanel::FetchActiveServerParticipants()
 {
-   if (!mServerEnabled || mServerStatus != "Ready" || mServerID.empty() || mAccessToken.empty()) {
+   if (!ServerIsReady()) {
       return;
    }
 
@@ -2986,6 +3125,190 @@ void VirtualStudioPanel::FetchActiveServerParticipants()
    );
 }
 
+void VirtualStudioPanel::FetchFullMixMediaSegments()
+{
+   if (!ServerIsReady() || mTrackName.IsEmpty() || mServerBroadcast == 0) {
+      return;
+   }
+
+   std::string secret = sha256("jktp-" + mServerID + "-" + mServerSessionID);
+   std::string url = "https://" + mServerSessionID + ".jacktrip.cloud/media/segments/full";
+   audacity::network_manager::Request request(url);
+   request.setHeader("Authorization", "Bearer " + secret);
+   request.setHeader("Content-Type", "application/json");
+   request.setHeader("Accept", "application/json");
+
+   auto response = audacity::network_manager::NetworkManager::GetInstance().doGet(request);
+   response->setRequestFinishedCallback(
+      [response, this](auto)
+      {
+         const auto httpCode = response->getHTTPCode();
+         wxLogInfo("FetchFullMixMediaSegments HTTP code: %d", httpCode);
+
+         if (httpCode != 200) {
+            return;
+         }
+
+         const auto body = response->readAll<std::string>();
+
+         rapidjson::Document document;
+         document.Parse(body.data(), body.size());
+
+         // Check for parse errors
+         if (document.HasParseError()) {
+            wxLogInfo("Error parsing JSON: %s", document.GetParseError());
+            return;
+         }
+
+         if (!document.IsArray()) {
+            return;
+         }
+
+         auto files = document.GetArray();
+         auto sz = files.Size();
+         rapidjson::SizeType i = 0;
+         for (auto& v : document.GetArray()) {
+            if (i == sz - 1) {
+               auto filename = std::string(v.GetString());
+               if (!mDownloadedMediaFiles[filename]) {
+                  mDownloadedMediaFiles[filename] = true;
+                  FetchMediaSegment(filename);
+               }
+            }
+            i++;
+         }
+      }
+   );
+}
+
+void VirtualStudioPanel::FetchMediaSegment(const std::string &filename)
+{
+   if (!ServerIsReady() || mTrackName.IsEmpty() || mServerBroadcast == 0) {
+      return;
+   }
+   std::cout << "FetchMediaSegment for " << filename << std::endl;
+
+   auto outputDir = VirtualStudioPanel::GetDownloadLocalDir(mServerID);
+   if (!wxDirExists(outputDir)) {
+      wxMkdir(outputDir);
+   }
+
+   auto filepath = wxFileName(outputDir, filename).GetFullPath().ToStdString();
+   mDownloadOutput.open(filepath, std::ios::binary);
+   wxLogInfo("Downloading to: %s", filepath);
+
+   std::string secret = sha256("jktp-" + mServerID + "-" + mServerSessionID);
+   std::string url = "https://" + mServerSessionID + ".jacktrip.cloud/stream/" + filename;
+
+   audacity::network_manager::Request request(url);
+   request.setHeader("Authorization", "Bearer " + secret);
+   request.setHeader("Content-Type", "application/json");
+   request.setHeader("Accept", "application/json");
+
+   auto response = audacity::network_manager::NetworkManager::GetInstance().doGet(request);
+   response->setRequestFinishedCallback(
+      [response, filepath, this](auto)
+      {
+         const auto httpCode = response->getHTTPCode();
+         wxLogInfo("FetchMediaSegment HTTP code: %d", httpCode);
+         std::cout << "FetchMediaSegment HTTP code: " << httpCode << std::endl;
+
+         if (mDownloadOutput.is_open()) {
+            mDownloadOutput.close();
+         }
+
+         if (httpCode != 200) {
+            return;
+         }
+
+         wxLogInfo("Download complete");
+         wxTheApp->CallAfter([filepath, this] {
+            mQueue.Put(filepath);
+            //LoadSegment(filepath);
+         });
+      }
+   );
+
+   // Called each time, since downloading for get data.
+   response->setOnDataReceivedCallback([response, this](audacity::network_manager::IResponse*) {
+      if (response->getError() == audacity::network_manager::NetworkError::NoError) {
+         std::vector<char> buffer(response->getBytesAvailable());
+         size_t bytes = response->readData(buffer.data(), buffer.size());
+
+         if (mDownloadOutput.is_open()) {
+            mDownloadOutput.write(buffer.data(), buffer.size());
+         }
+      }
+   });
+}
+
+void VirtualStudioPanel::LoadSegment(const std::string &filepath)
+{
+   auto &trackFactory = WaveTrackFactory::Get( mProject );
+   auto oldTags = Tags::Get( mProject ).shared_from_this();
+   auto newTags = oldTags->Duplicate();
+   bool isFirstSegment = mRecTracks.size() == 0;
+
+   std::cout << "LoadSegment for " << filepath << std::endl;
+   // check if this image file exists
+   std::ifstream f(filepath.c_str());
+   if (!f.good()) {
+      std::cout << "File " << filepath << " does not exist" << std::endl;
+      return;
+   }
+
+   // initialize Importer
+   auto &importer = Importer::Get();
+   if (!importer.Initialize()) {
+      std::cout << "Failed to initialize importer" << std::endl;
+      return;
+   }
+
+   TrackHolders tmpTracks;
+   TranslatableString errorMessage;
+   std::cout << "calling Import" << std::endl;
+   bool success = importer.Import(mProject, filepath, &trackFactory, tmpTracks, newTags.get(), errorMessage);
+   std::cout << "done Import" << std::endl;
+   if (!success || !errorMessage.empty()) {
+      std::cout << "Failed to load file " << filepath << " with error: " << errorMessage  << std::endl;
+      return;
+   }
+
+   if (tmpTracks.size() <= 0) {
+      return;
+   }
+
+   for (int j = 0; j < tmpTracks[0].size(); j++) {
+      const auto track = tmpTracks[0][j];
+      if (mRecTracks.size() < 2) {
+         mRecTracks.push_back(track);
+      } else {
+         mRecTracks[j]->Paste(mRecTracks[j]->GetEndTime(), track.get());
+         if (mRecTracks[j]->GetNumClips() >= 2) {
+            mRecTracks[j]->MergeClips(0, 1);
+         }
+      }
+   }
+
+   if (isFirstSegment) {
+      TrackHolders th;
+      th.push_back(mRecTracks);
+      std::cout << "calling AddImportedTracks" << std::endl;
+      ProjectFileManager::Get( mProject ).AddImportedTracks(mTrackName, std::move(th));
+      std::cout << "done AddImportedTracks" << std::endl;
+   } else {
+      std::cout << "calling Flush" << std::endl;
+      for (int i = 0; i < mRecTracks.size(); i++) {
+         mRecTracks[i]->Flush();
+      }
+      std::cout << "done Flush" << std::endl;
+   }
+
+   if (!wxRemoveFile(filepath)) {
+      std::cout << "failed to remove " << filepath << std::endl;
+   }
+}
+
 void VirtualStudioPanel::DoClose()
 {
    ResetStudio();
@@ -3013,6 +3336,115 @@ void VirtualStudioPanel::OnJoin(const wxCommandEvent& event)
    BasicUI::OpenInDefaultBrowser(url);
 }
 
+void VirtualStudioPanel::OnRecord(const wxCommandEvent& event)
+{
+   if (mServerID.empty() || mAccessToken.empty()) {
+      return;
+   }
+   if (!mTrackName.IsEmpty()) {
+      StopRecording();
+      return;
+   }
+
+   if (!ServerIsReady()) {
+      wxTheApp->CallAfter([] {
+         BasicUI::ShowErrorDialog( {},
+            XC("Studio is Offline", "Virtual Studio"),
+            XC("Start this studio to begin recording.", "Virtual Studio"),
+            wxString(),
+            BasicUI::ErrorDialogOptions{ BasicUI::ErrorDialogType::ModalErrorReport });
+         }
+      );
+      return;
+   }
+   if (!mServerAdmin) {
+      wxTheApp->CallAfter([] {
+         BasicUI::ShowErrorDialog( {},
+            XC("Not Allowed", "Virtual Studio"),
+            XC("Recording requires Virtual Studio studio admin permissions.", "Virtual Studio"),
+            wxString(),
+            BasicUI::ErrorDialogOptions{ BasicUI::ErrorDialogType::ModalErrorReport });
+         }
+      );
+      return;
+   }
+   if (mServerBroadcast == 0) {
+      wxTheApp->CallAfter([] {
+         BasicUI::ShowErrorDialog( {},
+            XC("Broadcast is Offline", "Virtual Studio"),
+            XC("Enable broadcasting to start capturing audio.", "Virtual Studio"),
+            wxString(),
+            BasicUI::ErrorDialogOptions{ BasicUI::ErrorDialogType::ModalErrorReport });
+         }
+      );
+      return;
+   }
+
+   auto &trackList = TrackList::Get( mProject );
+   //bool initiallyEmpty = trackList.empty();
+
+   // generate track name
+   mTrackName = trackList.MakeUniqueTrackName(mServerName);
+   std::cout << "Track name: " << mTrackName << std::endl;
+
+   mDownloadedMediaFiles.clear();
+   mRecTracks.clear(); // WaveTrackArray
+
+   InitRecording();
+
+   mRecButton->SetLabel(XO("Stop"));
+   mRecButton->SetForegroundColour(theTheme.Colour(clrMeterInputClipBrush));
+
+   /*
+   const int count = 2;
+   for (int i = 0; i < count; i++) {
+      TrackHolders tmpTracks;
+      TranslatableString errorMessage;
+      bool success = importer.Import(mProject, files[i], &trackFactory, tmpTracks, newTags.get(), errorMessage);
+      std::cout << "Success: " << success << std::endl;
+      std::cout << "Trackholder len: " << tmpTracks.size() << std::endl;
+      if (tmpTracks.size() > 0) {
+         for (int j = 0; j < tmpTracks[0].size(); j++) {
+            const auto track = tmpTracks[0][j];
+            if (waveTracks.size() < 2) {
+               waveTracks.push_back(track);
+            } else {
+               std::cout << "TODO: Append here, " << track->GetNumClips() << " " << waveTracks[i]->GetEndTime() << std::endl;
+               waveTracks[j]->Paste(waveTracks[i]->GetEndTime(), track.get());
+               //waveTracks[i].push_back(track);
+            }
+            std::cout << "track is: " << track->GetOffset() << " " << track->GetStartTime() << " " << track->GetEndTime() << std::endl;
+         }
+      }
+      if (i < count-1) {
+         std::this_thread::sleep_for(std::chrono::seconds(2));
+      }
+   }
+
+   trackHolder.push_back(waveTracks);
+   //TrackHolders th = dynamic_cast<TrackHolders>(trackHolder);
+
+   std::cout << "calling AddImportedTracks" << std::endl;
+   ProjectFileManager::Get( mProject ).AddImportedTracks(files[0], std::move(trackHolder));
+   std::cout << "done AddImportedTracks" << std::endl;
+   */
+}
+
+void VirtualStudioPanel::OnNewRecordingSegment(const wxTimerEvent& event)
+{
+   std::cout << "calling OnNewRecordingSegment" << std::endl;
+   std::string filename;
+
+   if (!ServerIsReady() || mTrackName.IsEmpty() || mServerBroadcast == 0) {
+      mQueue.Clear();
+      return;
+   }
+
+   while (mQueue.Get(filename)) {
+      LoadSegment(filename);
+   }
+}
+
 void VirtualStudioPanel::SetStudio()
 {
    if (mServerID.empty() || mAccessToken.empty()) {
@@ -3024,15 +3456,15 @@ void VirtualStudioPanel::SetStudio()
 
 void VirtualStudioPanel::ResetStudio()
 {
-   std::cout << "Stopping websocket in ResetStudio" << std::endl;
    StopWebsockets();
-   std::cout << "Stopped websocket in ResetStudio" << std::endl;
+   StopRecording();
    UpdateServerName("");
    UpdateServerStatus("Disabled");
    UpdateServerEnabled(false);
    UpdateServerOwnerID("");
    UpdateServerSampleRate(0);
    UpdateServerBroadcast(0);
+   UpdateServerStreamID("");
    UpdateServerAdmin(false);
    mSubscriptionsMap->Clear();
    mParticipantsList->Reset();

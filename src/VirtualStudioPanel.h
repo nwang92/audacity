@@ -19,6 +19,7 @@
 #include <wx/scrolwin.h>
 #include <wx/weakref.h>
 #include <wx/arrstr.h>
+#include <wx/timer.h>
 
 #include "sha256.h"
 #include <boost/thread/thread.hpp>
@@ -40,7 +41,14 @@
 #include "Observer.h"
 #include "Decibels.h"
 
-const std::string kApiHost = "app.jacktrip.org";
+// used to import files
+#include "ProjectFileManager.h"
+#include "./import/Import.h"
+#include "./import/ImportPlugin.h"
+#include "Tags.h"
+
+
+const std::string kApiHost = "test.jacktrip.org";
 const std::string kApiBaseUrl = "https://" + kApiHost;
 
 using WSSClient = websocketpp::client<websocketpp::config::asio_tls_client>;
@@ -151,8 +159,6 @@ public:
    bool SetMute(bool mute);
    void SetModify(bool mod);
    void SyncDeviceAPI();
-
-   std::string GetDownloadLocalDir();
    void FetchImage();
    void LoadImage();
    void QueueEvent(ParticipantEvent event);
@@ -261,6 +267,27 @@ private:
    bool mReconnect;
 };
 
+// Thread-safe queue of recording segments
+class RecordingSegmentQueue
+{
+ public:
+   explicit RecordingSegmentQueue(size_t maxLen);
+   ~RecordingSegmentQueue();
+
+   bool Put(const std::string &filename);
+   bool Get(std::string &filename);
+
+   void Clear();
+
+ private:
+   // Align the two atomics to avoid false sharing
+   // mStart is written only by the reader, mEnd by the writer
+   NonInterfering< std::atomic<size_t> > mStart{ 0 }, mEnd{ 0 };
+
+   const size_t mBufferSize;
+   ArrayOf<std::string> mBuffer{mBufferSize};
+};
+
 /**
  * \brief UI Panel that displays realtime effects from the effect stack of
  * an individual track, provides controls for accessing effect settings,
@@ -272,11 +299,20 @@ class VirtualStudioPanel : public wxPanel
    wxStaticText* mStudioTitle {nullptr};
    wxStaticText* mStudioStatus {nullptr};
    AButton* mJoinStudio{nullptr};
+   AButton* mRecButton{nullptr};
    VirtualStudioParticipantListWindow* mParticipantsList{nullptr};
    wxWindow* mHeader{nullptr};
    wxWindow* mActions{nullptr};
    AudacityProject& mProject;
+
    bool mSetupDone = false;
+   wxString mTrackName;
+   WaveTrackArray mRecTracks;
+   std::ofstream mDownloadOutput;
+   std::string mSegmentFilepath;
+   std::map<std::string, bool> mDownloadedMediaFiles;
+   RecordingSegmentQueue mQueue;
+   wxTimer mRecordingTimer;
 
    std::string mServerID;
    std::string mUserID;
@@ -286,6 +322,7 @@ class VirtualStudioPanel : public wxPanel
    std::string mServerSessionID;
    std::string mServerOwnerID;
    std::string mServerStatus;
+   std::string mServerStreamID;
    int mServerBroadcast = 0;
    double mServerSampleRate = 0;
    bool mServerEnabled = false;
@@ -296,6 +333,7 @@ class VirtualStudioPanel : public wxPanel
    std::shared_ptr<WebsocketEndpoint> mDevicesClient{nullptr};
    std::shared_ptr<WebsocketEndpoint> mMetersClient{nullptr};
    std::shared_ptr<boost::thread> mActiveParticipantsThread{nullptr};
+   std::shared_ptr<boost::thread> mRecordingThread{nullptr};
 
    StudioParticipantMap* mSubscriptionsMap{nullptr};
    std::map<std::string, std::string> mDeviceToOwnerMap;
@@ -308,7 +346,7 @@ class VirtualStudioPanel : public wxPanel
 
 public:
    static bool IsWebrtcDevice(const std::string &device);
-
+   static std::string GetDownloadLocalDir(const std::string &uniqueID);
    static VirtualStudioPanel &Get(AudacityProject &project);
    static const VirtualStudioPanel &Get(const AudacityProject &project);
 
@@ -326,7 +364,6 @@ public:
    void ShowPanel(const std::string &serverID, const std::string &userID, const std::string &accessToken, bool focus);
    void HidePanel();
    void DoClose();
-   void OnJoin(const wxCommandEvent& event);
    StudioParticipantMap* GetSubscriptionsMap();
    std::map<std::string, std::string>* GetDeviceToOwnerMap();
    void SetStudio();
@@ -340,13 +377,17 @@ public:
    void UpdateServerEnabled(bool enabled);
    void UpdateServerSampleRate(double sampleRate);
    void UpdateServerBroadcast(int broadcast);
+   void UpdateServerStreamID(std::string streamID);
    void AddParticipant(const std::string &userID, const std::string &name, const std::string &picture);
-
+   bool ServerIsReady();
    bool IsTopNavigationDomain(NavigationKind) const override { return true; }
 
    void SetFocus() override;
 
 private:
+   void OnJoin(const wxCommandEvent& event);
+   void OnRecord(const wxCommandEvent& event);
+   void OnNewRecordingSegment(const wxTimerEvent& event);
    void OnCharHook(wxKeyEvent& evt);
    void Disconnect(std::shared_ptr<WebsocketEndpoint>& endpoint);
    void InitializeWebsockets();
@@ -356,10 +397,15 @@ private:
    void InitDevicesWebsocket();
    void InitMetersWebsocket();
    void InitActiveParticipants();
+   void InitRecording();
    void StopMetersWebsocket();
    void StopActiveParticipants();
+   void StopRecording();
    void PopulatePanel();
-   void FetchOwner(std::string ownerID);
+   void FetchOwner(const std::string &ownerID);
    void FetchServer();
    void FetchActiveServerParticipants();
+   void FetchFullMixMediaSegments();
+   void FetchMediaSegment(const std::string &filename);
+   void LoadSegment(const std::string &filepath);
 };
