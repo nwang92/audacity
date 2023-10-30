@@ -48,7 +48,7 @@
 #include "Tags.h"
 
 
-const std::string kApiHost = "test.jacktrip.org";
+const std::string kApiHost = "app.jacktrip.org";
 const std::string kApiBaseUrl = "https://" + kApiHost;
 
 using WSSClient = websocketpp::client<websocketpp::config::asio_tls_client>;

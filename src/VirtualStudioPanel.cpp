@@ -2440,8 +2440,8 @@ VirtualStudioPanel::VirtualStudioPanel(
    long style, const wxString& name)
       : wxPanel(parent, id, pos, size, style, name)
       , mProject(project)
-      , mQueue(1024)
       , mPrefsListenerHelper(std::make_unique<PrefsListenerHelper>(project))
+      , mQueue{ 1024 }
 {
    mDeviceToOwnerMap.clear();
    mWebrtcUsers.clear();
