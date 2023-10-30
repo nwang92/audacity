@@ -2916,9 +2916,6 @@ void VirtualStudioPanel::StopRecording()
    }
    mQueue.Clear();
 
-   if (mDownloadOutput.is_open()) {
-      mDownloadOutput.close();
-   }
    mDownloadedMediaFiles.clear();
    mRecTracks.clear(); // WaveTrackArray
    mRecButton->SetLabel(XO("Record"));
@@ -3194,7 +3191,11 @@ void VirtualStudioPanel::FetchMediaSegment(const std::string &filename)
    }
 
    auto filepath = wxFileName(outputDir, filename).GetFullPath().ToStdString();
-   mDownloadOutput.open(filepath, std::ios::binary);
+   std::shared_ptr<wxFile> downloadFile = std::make_shared<wxFile>();
+   if (!downloadFile->Create(filepath, true)) {
+      std::cout << "Failed to create download file " << filepath << std::endl;
+      return;
+   }
    wxLogInfo("Downloading to: %s", filepath);
 
    std::string secret = sha256("jktp-" + mServerID + "-" + mServerSessionID);
@@ -3207,15 +3208,13 @@ void VirtualStudioPanel::FetchMediaSegment(const std::string &filename)
 
    auto response = audacity::network_manager::NetworkManager::GetInstance().doGet(request);
    response->setRequestFinishedCallback(
-      [response, filepath, this](auto)
+      [response, filepath, downloadFile, this](auto)
       {
          const auto httpCode = response->getHTTPCode();
          wxLogInfo("FetchMediaSegment HTTP code: %d", httpCode);
          std::cout << "FetchMediaSegment HTTP code: " << httpCode << std::endl;
 
-         if (mDownloadOutput.is_open()) {
-            mDownloadOutput.close();
-         }
+         downloadFile->Close();
 
          if (httpCode != 200) {
             return;
@@ -3230,14 +3229,11 @@ void VirtualStudioPanel::FetchMediaSegment(const std::string &filename)
    );
 
    // Called each time, since downloading for get data.
-   response->setOnDataReceivedCallback([response, this](audacity::network_manager::IResponse*) {
+   response->setOnDataReceivedCallback([response, downloadFile, this](audacity::network_manager::IResponse*) {
       if (response->getError() == audacity::network_manager::NetworkError::NoError) {
          std::vector<char> buffer(response->getBytesAvailable());
          size_t bytes = response->readData(buffer.data(), buffer.size());
-
-         if (mDownloadOutput.is_open()) {
-            mDownloadOutput.write(buffer.data(), buffer.size());
-         }
+         downloadFile->Write(buffer.data(), buffer.size());
       }
    });
 }

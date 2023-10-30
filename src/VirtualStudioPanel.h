@@ -308,8 +308,6 @@ class VirtualStudioPanel : public wxPanel
    bool mSetupDone = false;
    wxString mTrackName;
    WaveTrackArray mRecTracks;
-   std::ofstream mDownloadOutput;
-   std::string mSegmentFilepath;
    std::map<std::string, bool> mDownloadedMediaFiles;
    RecordingSegmentQueue mQueue;
    wxTimer mRecordingTimer;
