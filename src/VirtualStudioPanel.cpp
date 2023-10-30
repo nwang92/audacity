@@ -2441,12 +2441,12 @@ VirtualStudioPanel::VirtualStudioPanel(
       : wxPanel(parent, id, pos, size, style, name)
       , mProject(project)
       , mPrefsListenerHelper(std::make_unique<PrefsListenerHelper>(project))
-      , mQueue{ 1024 }
 {
    mDeviceToOwnerMap.clear();
    mWebrtcUsers.clear();
    mSubscriptionsMap = safenew StudioParticipantMap(this);
    mRecordingTimer.Bind(wxEVT_TIMER, &VirtualStudioPanel::OnNewRecordingSegment, this);
+   mQueue.reset(new RecordingSegmentQueue(1024));
 
    auto vSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
 
@@ -2911,10 +2911,10 @@ void VirtualStudioPanel::StopRecording()
    }
    mRecordingThread.reset();
    std::string filename;
-   while (mQueue.Get(filename)) {
+   while (mQueue->Get(filename)) {
       LoadSegment(filename);
    }
-   mQueue.Clear();
+   mQueue->Clear();
 
    mDownloadedMediaFiles.clear();
    mRecTracks.clear(); // WaveTrackArray
@@ -3222,7 +3222,7 @@ void VirtualStudioPanel::FetchMediaSegment(const std::string &filename)
 
          wxLogInfo("Download complete");
          wxTheApp->CallAfter([filepath, this] {
-            mQueue.Put(filepath);
+            mQueue->Put(filepath);
             //LoadSegment(filepath);
          });
       }
@@ -3432,11 +3432,11 @@ void VirtualStudioPanel::OnNewRecordingSegment(const wxTimerEvent& event)
    std::string filename;
 
    if (!ServerIsReady() || mTrackName.IsEmpty() || mServerBroadcast == 0) {
-      mQueue.Clear();
+      mQueue->Clear();
       return;
    }
 
-   while (mQueue.Get(filename)) {
+   while (mQueue->Get(filename)) {
       LoadSegment(filename);
    }
 }

@@ -309,7 +309,7 @@ class VirtualStudioPanel : public wxPanel
    wxString mTrackName;
    WaveTrackArray mRecTracks;
    std::map<std::string, bool> mDownloadedMediaFiles;
-   RecordingSegmentQueue mQueue;
+   std::unique_ptr<RecordingSegmentQueue> mQueue{nullptr};
    wxTimer mRecordingTimer;
 
    std::string mServerID;
