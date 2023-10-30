@@ -3289,15 +3289,16 @@ void VirtualStudioPanel::LoadSegment(const std::string &filepath)
    if (isFirstSegment) {
       TrackHolders th;
       th.push_back(mRecTracks);
-      std::cout << "calling AddImportedTracks" << std::endl;
       ProjectFileManager::Get( mProject ).AddImportedTracks(mTrackName, std::move(th));
-      std::cout << "done AddImportedTracks" << std::endl;
+
+      // set focus to the track list window
+      auto &projectWindow = ProjectWindow::Get(mProject);
+      auto trackWindow = projectWindow.GetTrackListWindow();
+      trackWindow->SetFocus();
    } else {
-      std::cout << "calling Flush" << std::endl;
       for (int i = 0; i < mRecTracks.size(); i++) {
          mRecTracks[i]->Flush();
       }
-      std::cout << "done Flush" << std::endl;
    }
 
    if (!wxRemoveFile(filepath)) {

@@ -271,7 +271,7 @@ private:
 class RecordingSegmentQueue
 {
  public:
-   explicit RecordingSegmentQueue(size_t maxLen);
+   RecordingSegmentQueue(size_t maxLen);
    ~RecordingSegmentQueue();
 
    bool Put(const std::string &filename);
