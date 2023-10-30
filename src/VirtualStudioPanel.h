@@ -271,21 +271,16 @@ private:
 class RecordingSegmentQueue
 {
  public:
-   RecordingSegmentQueue(size_t maxLen);
+   RecordingSegmentQueue();
    ~RecordingSegmentQueue();
 
    bool Put(const std::string &filename);
    bool Get(std::string &filename);
-
    void Clear();
 
  private:
-   // Align the two atomics to avoid false sharing
-   // mStart is written only by the reader, mEnd by the writer
-   NonInterfering< std::atomic<size_t> > mStart{ 0 }, mEnd{ 0 };
-
-   const size_t mBufferSize;
-   ArrayOf<std::string> mBuffer{mBufferSize};
+   std::queue<std::string> mQueue;
+   mutable std::mutex mMutex;
 };
 
 /**

@@ -2357,8 +2357,7 @@ const ConnectionMetadata::ptr WebsocketEndpoint::GetMetadata(int id)
    }
 }
 
-RecordingSegmentQueue::RecordingSegmentQueue(size_t maxLen):
-   mBufferSize(maxLen)
+RecordingSegmentQueue::RecordingSegmentQueue()
 {
    Clear();
 }
@@ -2370,30 +2369,18 @@ RecordingSegmentQueue::~RecordingSegmentQueue()
 
 void RecordingSegmentQueue::Clear()
 {
-   mStart.store(0);
-   mEnd.store(0);
+   std::lock_guard<std::mutex> lock(mMutex);
+   while (!mQueue.empty()) {
+      mQueue.pop();
+   }
 }
 
 // Add a message to the end of the queue.  Return false if the
 // queue was full.
 bool RecordingSegmentQueue::Put(const std::string &filename)
 {
-   auto start = mStart.load(std::memory_order_acquire);
-   auto end = mEnd.load(std::memory_order_relaxed);
-   // mStart can be greater than mEnd because it is all mod mBufferSize
-   assert( (end + mBufferSize - start) >= 0 );
-   int len = (end + mBufferSize - start) % mBufferSize;
-
-   // Never completely fill the queue, because then the
-   // state is ambiguous (mStart==mEnd)
-   if (len + 1 >= (int)(mBufferSize))
-      return false;
-
-   //wxLogDebug(wxT("Put: %s"), msg.toString());
-
-   mBuffer[end] = filename;
-   mEnd.store((end + 1) % mBufferSize, std::memory_order_release);
-
+   std::lock_guard<std::mutex> lock(mMutex);
+   mQueue.push(filename);
    return true;
 }
 
@@ -2401,16 +2388,12 @@ bool RecordingSegmentQueue::Put(const std::string &filename)
 // Return false if the queue was empty.
 bool RecordingSegmentQueue::Get(std::string &filename)
 {
-   auto start = mStart.load(std::memory_order_relaxed);
-   auto end = mEnd.load(std::memory_order_acquire);
-   int len = (end + mBufferSize - start) % mBufferSize;
-
-   if (len == 0)
+   std::lock_guard<std::mutex> lock(mMutex);
+   if (mQueue.empty()) {
       return false;
-
-   filename = mBuffer[start];
-   mStart.store((start + 1) % mBufferSize, std::memory_order_release);
-
+   }
+   filename = mQueue.front();
+   mQueue.pop();
    return true;
 }
 
@@ -2446,7 +2429,7 @@ VirtualStudioPanel::VirtualStudioPanel(
    mWebrtcUsers.clear();
    mSubscriptionsMap = safenew StudioParticipantMap(this);
    mRecordingTimer.Bind(wxEVT_TIMER, &VirtualStudioPanel::OnNewRecordingSegment, this);
-   mQueue.reset(new RecordingSegmentQueue(1024));
+   mQueue.reset(new RecordingSegmentQueue());
 
    auto vSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
 
@@ -3299,6 +3282,11 @@ void VirtualStudioPanel::LoadSegment(const std::string &filepath)
       for (int i = 0; i < mRecTracks.size(); i++) {
          mRecTracks[i]->Flush();
       }
+
+      // set focus to the track list window
+      auto &projectWindow = ProjectWindow::Get(mProject);
+      auto trackWindow = projectWindow.GetTrackListWindow();
+      trackWindow->SetFocus();
    }
 
    if (!wxRemoveFile(filepath)) {
