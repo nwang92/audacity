@@ -33,6 +33,7 @@
 
 #include <wx/menu.h>
 #include <wx/dialog.h>
+#include <wx/timer.h>
 #include "ToolBar.h"
 #include "BasicUI.h"
 #include "ProjectFileManager.h"
@@ -67,7 +68,6 @@ class wxMenu;
 class wxString;
 class wxButton;
 class VirtualStudioAuthDialog;
-class VirtualStudioServerPanel;
 class VSFLACImportFileHandle;
 class MyVSFLACFile;
 struct DeviceSourceMap;
@@ -324,6 +324,7 @@ class VirtualStudioAuthDialog final : public wxDialogWrapper
    void DoLayout();
    void UpdateLayout();
 
+   void PollForToken(const wxTimerEvent& event);
    void InitDeviceAuthorizationCodeFlow(std::string* parentAccessTokenPtr);
    void StartPolling(std::string* parentAccessTokenPtr);
    void CheckForToken(std::string* parentAccessTokenPtr);
@@ -334,6 +335,7 @@ class VirtualStudioAuthDialog final : public wxDialogWrapper
    wxButton *mCancel;
    wxButton *mSignIn;
    wxButton *mClose;
+   std::string* mParentAccessTokenPtr;
 
    std::string mIDToken;
    std::string mAccessToken;
@@ -342,6 +344,7 @@ class VirtualStudioAuthDialog final : public wxDialogWrapper
    std::string mUserCode;
    std::string mVerificationUri;
    std::string mVerificationUriComplete;
+   wxTimer mPollTimer;
    int mPollingInterval;
    int mExpiresIn;
 
@@ -349,60 +352,6 @@ class VirtualStudioAuthDialog final : public wxDialogWrapper
    bool mSuccess;
    int mStyle;
    float mValue;
-
- public:
-   DECLARE_EVENT_TABLE()
-};
-
-class VirtualStudioServerPanel final : public wxPanelWrapper {
- public:
-   VirtualStudioServerPanel(
-         JackTripToolBar* toolbar,
-         wxWindow *parent,
-         AudacityProject* projectPtr,
-         std::string serverID,
-         std::string accessToken,
-         wxWindowID winid = wxID_ANY,
-         const wxPoint& pos = wxDefaultPosition,
-         const wxSize& size = wxDefaultSize,
-         long style = wxTAB_TRAVERSAL | wxNO_BORDER);
-
-   ~VirtualStudioServerPanel();
-   void OnServerWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg);
-   void OnWssOpen(ConnectionHdl hdl);
-   static websocketpp::lib::shared_ptr<SslContext> OnTlsInit();
-
- private:
-   void DoLayout();
-   void UpdateLayout();
-
-   void FetchServer();
-   void InitializeWebsocket();
-   void OnJoin(wxCommandEvent &event);
-   void OnRecord(wxCommandEvent &event);
-   void OnStop(wxCommandEvent &event);
-   void OnClose(wxCommandEvent &event);
-   void DisableLogging(WSSClient& client);
-   void SetUrl(WSSClient& client, std::string url);
-
-   wxButton *mJoin;
-   wxButton *mRecord;
-   wxButton *mStop;
-   wxButton *mClose;
-   boost::thread mServerThread;
-
-   std::string mServerID;
-   std::string mServerName;
-   std::string mServerBannerUrl;
-   std::string mServerSessionID;
-   std::string mServerStatus;
-   double mServerSampleRate;
-   bool mServerEnabled;
-   bool mIsRecording;
-
-   std::string mAccessToken;
-   AudacityProject *mCurrProject;
-   JackTripToolBar *mToolbar;
 
  public:
    DECLARE_EVENT_TABLE()

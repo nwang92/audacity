@@ -1309,7 +1309,6 @@ void JackTripToolBar::OnRefresh(wxCommandEvent& event)
 void JackTripToolBar::OnAuth(wxCommandEvent& event)
 {
    VirtualStudioAuthDialog dlg(this, &mAccessToken);
-   dlg.SetSize(800, 600);
    int retCode = dlg.ShowModal();
 
    dlg.Center();
@@ -1637,6 +1636,9 @@ END_EVENT_TABLE();
 VirtualStudioAuthDialog::VirtualStudioAuthDialog(wxWindow* parent, std::string* parentAccessTokenPtr):
    wxDialogWrapper(parent, wxID_ANY, XO("Login to Virtual Studio"), wxDefaultPosition, { 480, -1 }, wxDEFAULT_DIALOG_STYLE)
 {
+   mParentAccessTokenPtr = parentAccessTokenPtr;
+   mPollTimer.Bind(wxEVT_TIMER, &VirtualStudioAuthDialog::PollForToken, this);
+
    if (mDeviceCode.empty()) {
       InitDeviceAuthorizationCodeFlow(parentAccessTokenPtr);
    }
@@ -1644,6 +1646,8 @@ VirtualStudioAuthDialog::VirtualStudioAuthDialog(wxWindow* parent, std::string* 
 
 VirtualStudioAuthDialog::~VirtualStudioAuthDialog()
 {
+   mPollTimer.Stop();
+
    mIDToken = "";
    mAccessToken = "";
    mRefreshToken = "";
@@ -1804,7 +1808,7 @@ void VirtualStudioAuthDialog::InitDeviceAuthorizationCodeFlow(std::string* paren
          std::cout << "Expires in: " << mExpiresIn << std::endl;
 
          wxTheApp->CallAfter([this]{ DoLayout(); });
-         StartPolling(parentAccessTokenPtr);
+         wxTheApp->CallAfter([this]{ mPollTimer.Start(mPollingInterval * 1000); });
       }
    );
 }
@@ -1814,13 +1818,26 @@ void VirtualStudioAuthDialog::StartPolling(std::string* parentAccessTokenPtr)
    mExpiresIn -= mPollingInterval;
    if (mPollingInterval <= 0 || mExpiresIn <= 0) {
       std::cout << "Stopped polling" << std::endl;
+      mPollTimer.Stop();
       return;
    }
 
    std::this_thread::sleep_for(std::chrono::seconds(mPollingInterval));
    if (mIDToken.empty() || mAccessToken.empty() || mRefreshToken.empty()) {
       CheckForToken(parentAccessTokenPtr);
-      StartPolling(parentAccessTokenPtr);
+   }
+}
+
+void VirtualStudioAuthDialog::PollForToken(const wxTimerEvent& event)
+{
+   std::cout << "PollForToken called" << std::endl;
+   mExpiresIn -= mPollingInterval;
+   if (mPollingInterval <= 0 || mExpiresIn <= 0) {
+      std::cout << "Stopped polling" << std::endl;
+      return;
+   }
+   if (mIDToken.empty() || mAccessToken.empty() || mRefreshToken.empty()) {
+      CheckForToken(mParentAccessTokenPtr);
    }
 }
 
@@ -1876,6 +1893,7 @@ void VirtualStudioAuthDialog::CheckForToken(std::string* parentAccessTokenPtr)
          mSuccess = true;
          mPollingInterval = 0;
          mExpiresIn = 0;
+         wxTheApp->CallAfter([this]{ mPollTimer.Stop(); });
          wxTheApp->CallAfter([this]{ UpdateLayout(); });
       }
    );
@@ -1892,373 +1910,4 @@ void VirtualStudioAuthDialog::OnSignIn(wxCommandEvent &event)
 void VirtualStudioAuthDialog::OnClose(wxCommandEvent &event)
 {
    Close();
-}
-
-BEGIN_EVENT_TABLE(VirtualStudioServerPanel, wxPanelWrapper)
-   EVT_BUTTON(JoinButtonID, VirtualStudioServerPanel::OnJoin)
-   EVT_BUTTON(RecordingButtonID, VirtualStudioServerPanel::OnRecord)
-   EVT_BUTTON(StopButtonID, VirtualStudioServerPanel::OnStop)
-   EVT_BUTTON(CloseStudioButtonID, VirtualStudioServerPanel::OnClose)
-END_EVENT_TABLE();
-
-VirtualStudioServerPanel::VirtualStudioServerPanel(JackTripToolBar* toolbar,
-                                                   wxWindow* parent,
-                                                   AudacityProject* projectPtr,
-                                                   std::string serverID,
-                                                   std::string accessToken,
-                                                   wxWindowID winid,
-                                                   const wxPoint& pos,
-                                                   const wxSize& size,
-                                                   long style):
-   wxPanelWrapper(parent, winid, pos, size, style)
-{
-   mToolbar = toolbar;
-   mServerID = serverID;
-   mAccessToken = accessToken;
-   mCurrProject = projectPtr;
-   if (!mServerID.empty() && !mAccessToken.empty()) {
-      std::cout << "Starting websocket" << std::endl;
-      InitializeWebsocket();
-      std::cout << "Started websocket" << std::endl;
-
-      /*
-      Client client;
-      //turn_off_logging(client);
-      client.init_asio();
-      set_tls_init_handler(client);
-      set_open_handler(client);
-      set_message_handler(client);
-      std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "?auth_code=" + mAccessToken;
-      std::cout << "URL is: " << url << std::endl;
-      set_url(client, url);
-
-      websocketpp::lib::thread t1(&Client::run, &client);
-      t1.join();
-      */
-   }
-}
-
-VirtualStudioServerPanel::~VirtualStudioServerPanel()
-{
-   std::cout << "Stopping websocket in destructor" << std::endl;
-   mServerThread.interrupt();
-   mServerThread.join();
-   std::cout << "Stopped websocket in destructor" << std::endl;
-
-   mServerID = "";
-   mAccessToken = "";
-}
-
-void VirtualStudioServerPanel::OnServerWssMessage(ConnectionHdl hdl, websocketpp::config::asio_client::message_type::ptr msg)
-{
-   using namespace rapidjson;
-
-   auto payload = msg->get_payload();
-
-   Document document;
-   document.Parse(payload.c_str());
-   // Check for parse errors
-   if (document.HasParseError()) {
-      wxLogInfo("Error parsing JSON: %s", document.GetParseError());
-      return;
-   }
-
-   mServerName = document["name"].GetString();
-   mServerBannerUrl = document["bannerURL"].GetString();
-   mServerSessionID = document["sessionId"].GetString();
-   mServerStatus = document["status"].GetString();
-   mServerSampleRate = document["sampleRate"].GetDouble();
-   mServerEnabled = document["enabled"].GetBool();
-
-   std::cout << std::endl;
-   std::cout << mServerName << std::endl;
-   std::cout << mServerBannerUrl << std::endl;
-   std::cout << mServerSessionID << std::endl;
-   std::cout << mServerStatus << std::endl;
-   std::cout << mServerSampleRate << std::endl;
-   std::cout << mServerEnabled << std::endl;
-
-   wxTheApp->CallAfter([this]{ DoLayout(); });
-  //client->close(hdl, websocketpp::close::status::normal, "done");
-}
-
-void VirtualStudioServerPanel::OnWssOpen(ConnectionHdl hdl)
-{
-   std::cout << "nay" << std::endl;
-  //std::string msg{"hello"};
-  //std::cout << "on_open: send " << msg << std::endl;
-  //client->send(hdl, msg, websocketpp::frame::opcode::text);
-}
-
-websocketpp::lib::shared_ptr<SslContext> VirtualStudioServerPanel::OnTlsInit()
-{
-   auto ctx = websocketpp::lib::make_shared<SslContext>(boost::asio::ssl::context::sslv23);
-   return ctx;
-};
-
-void VirtualStudioServerPanel::DoLayout()
-{
-   ShuttleGui s(this, eIsCreating);
-
-   s.StartVerticalLay(wxEXPAND);
-   {
-      s.SetBorder(4);
-      s.StartHorizontalLay(wxALIGN_RIGHT, 0);
-      {
-         s.AddSpace(0, 0, 1);
-         mClose = s.Id(CloseStudioButtonID).AddButton(XXO("&Disconnect"));
-         s.AddSpace(0, 0, 1);
-      }
-      s.EndHorizontalLay();
-
-      s.AddSpace(0, 4, 0);
-      s.AddTitle(XO("Name: " + mServerName));
-      s.AddTitle(XO("Status: " + mServerStatus));
-      s.AddSpace(0, 4, 0);
-
-      s.StartHorizontalLay(wxEXPAND, 0);
-      {
-         s.AddSpace(0, 0, 1);
-         if (mServerStatus == "Ready") {
-            mJoin = s.Id(JoinButtonID).AddButton(XXO("&Launch JackTrip App"));
-         } else {
-            mJoin = s.Id(JoinButtonID).AddButton(XXO("&Start Studio"));
-         }
-         s.AddSpace(0, 0, 1);
-      }
-      s.EndHorizontalLay();
-
-      s.StartInvisiblePanel(16);
-      {
-         s.SetBorder(2);
-
-         if (!mServerBannerUrl.empty()) {
-            s.AddSpace(0, 16, 0);
-            // TODO: This doesn't work
-            // wxImage img;
-            // img.LoadFile(mServerBannerUrl);
-            // img.Rescale((int)(LOGOWITHNAME_WIDTH), (int)(LOGOWITHNAME_HEIGHT));
-            // wxBitmap bitmap(img);
-            // s.AddIcon(&bitmap);
-         }
-
-         if (!mServerSessionID.empty() || mServerSessionID.empty()) {
-            s.AddSpace(0, 24, 0);
-            s.AddTitle(XO("Record Live Session"));
-            s.AddSpace(0, 8, 0);
-            s.StartHorizontalLay(wxEXPAND, 0);
-            {
-               s.AddSpace(0, 0, 1);
-
-               mRecord = s.Id(RecordingButtonID).AddButton(XXO("&Record"));
-               s.AddSpace(4, 0, 0);
-               mStop = s.Id(StopButtonID).AddButton(XXO("&Stop"));
-
-               s.AddSpace(0, 0, 1);
-            }
-            s.EndHorizontalLay();
-         }
-
-         s.AddSpace(0, 16, 0);
-      }
-      s.EndInvisiblePanel();
-   }
-   s.EndVerticalLay();
-
-   Layout();
-   //Fit();
-   //Centre();
-}
-
-void VirtualStudioServerPanel::UpdateLayout()
-{
-   std::cout << "UpdateLayout called" << std::endl;
-}
-
-void VirtualStudioServerPanel::FetchServer()
-{
-   audacity::network_manager::Request request(kApiBaseUrl + "/api/servers/" + mServerID);
-   request.setHeader("Authorization", "Bearer " + mAccessToken);
-   request.setHeader("Content-Type", "application/json");
-   request.setHeader("Accept", "application/json");
-
-   auto response = audacity::network_manager::NetworkManager::GetInstance().doGet(request);
-   response->setRequestFinishedCallback(
-      [response, this](auto)
-      {
-         const auto httpCode = response->getHTTPCode();
-         wxLogInfo("FetchServer HTTP code: %d", httpCode);
-
-         if (httpCode != 200)
-            return;
-
-         const auto body = response->readAll<std::string>();
-
-         using namespace rapidjson;
-         Document document;
-         document.Parse(body.data(), body.size());
-
-         // Check for parse errors
-         if (document.HasParseError()) {
-            wxLogInfo("Error parsing JSON: %s", document.GetParseError());
-            return;
-         }
-
-         mServerName = document["name"].GetString();
-         mServerBannerUrl = document["bannerURL"].GetString();
-         mServerSessionID = document["sessionId"].GetString();
-         mServerStatus = document["status"].GetString();
-         mServerSampleRate = document["sampleRate"].GetDouble();
-         mServerEnabled = document["enabled"].GetBool();
-
-         std::cout << mServerName << std::endl;
-         std::cout << mServerBannerUrl << std::endl;
-         std::cout << mServerSessionID << std::endl;
-         std::cout << mServerStatus << std::endl;
-         std::cout << mServerSampleRate << std::endl;
-         std::cout << mServerEnabled << std::endl;
-
-         wxTheApp->CallAfter([this]{ DoLayout(); });
-      }
-   );
-}
-
-void VirtualStudioServerPanel::DisableLogging(WSSClient& client)
-{
-   client.clear_access_channels(websocketpp::log::alevel::all);
-   client.clear_error_channels(websocketpp::log::elevel::all);
-}
-
-void VirtualStudioServerPanel::SetUrl(WSSClient& client, std::string url)
-{
-   websocketpp::lib::error_code ec;
-   auto connection = client.get_connection(url, ec);
-   if (ec) {
-      std::cout << "error " << ec << std::endl;
-      return;
-   }
-   connection->append_header("Origin", "https://app.jacktrip.org");
-   client.connect(connection);
-}
-
-void VirtualStudioServerPanel::InitializeWebsocket()
-{
-   mServerThread = boost::thread([&]
-   {
-      WSSClient client;
-      DisableLogging(client);
-      client.init_asio();
-      client.set_tls_init_handler(websocketpp::lib::bind(&VirtualStudioServerPanel::OnTlsInit));
-      client.set_open_handler(websocketpp::lib::bind(&VirtualStudioServerPanel::OnWssOpen, this, ::_1));
-      client.set_message_handler(websocketpp::lib::bind(&VirtualStudioServerPanel::OnServerWssMessage, this, ::_1, ::_2));
-      std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "?auth_code=" + mAccessToken;
-      //std::cout << "URL is: " << url << std::endl;
-      SetUrl(client, url);
-
-      try {
-         client.run();
-      } catch (websocketpp::exception const & e) {
-         std::cout << e.what() << std::endl;
-      } catch (std::exception const & e) {
-         std::cout << e.what() << std::endl;
-      } catch (...) {
-         std::cout << "other exception" << std::endl;
-      }
-   });
-
-   mServerThread.detach();
-   /* This is the way the docs suggest doing this but it didn't work for me...
-   WSSClient client;
-   turn_off_logging(client);
-   client.init_asio();
-   client.start_perpetual();
-
-   set_tls_init_handler(client);
-   set_open_handler(client);
-   set_message_handler(client);
-   std::string url = "wss://" + kApiHost + "/api/servers/" + mServerID + "?auth_code=" + mAccessToken;
-   std::cout << "URL is: " << url << std::endl;
-   set_url(client, url);
-   mThread.reset(new websocketpp::lib::thread(&WSSClient::run, &client));
-   mThread->detach();
-   */
-}
-
-void VirtualStudioServerPanel::OnJoin(wxCommandEvent &event)
-{
-   if (mServerID.empty()) {
-      return;
-   }
-   auto url = "jacktrip://join/" + mServerID;
-   BasicUI::OpenInDefaultBrowser(url);
-}
-
-void VirtualStudioServerPanel::OnRecord(wxCommandEvent &event)
-{
-   if (mServerID.empty()) {
-      return;
-   }
-   std::cout << "OnRecord called" << std::endl;
-
-   NewChannelGroup       mChannels;
-   std::string flacFile = "/Users/nwang/work/basic-hls-server/good4u.flac";
-
-   wxFileName flacFileName(flacFile);
-   if (!flacFileName.FileExists()) {
-      std::cout << "File does not exist" << std::endl;
-   }
-
-   return;
-   /*
-   //auto track = WaveTrackFactory::Get(*mCurrProject).Create();
-   auto track = WaveTrack::New( *mCurrProject );
-   track->SetRate(mServerSampleRate);
-
-   auto numSamples = 2048;
-   std::ifstream infile(flacFile, std::ios::binary);
-   char buffer[numSamples];
-   infile.read(buffer, numSamples);
-   track->Append((samplePtr)buffer, floatSample, numSamples);
-   */
-
-   /*
-   auto track = WaveTrack::New( *mCurrProject );
-   std::string flacFile = "/Users/nwang/work/basic-hls-server/good4u.flac";
-
-   auto importer = FileImporter::Create(FileImporter::FLAC, flacFile);
-   importer->Import(track, false); // set append to false
-
-   bool s1 = ProjectFileManager::Get( *mCurrProject ).Import(flacFile, true);
-   std::cout << "s1: " << s1 << std::endl;
-
-   std::this_thread::sleep_for(std::chrono::seconds(20));
-
-   bool s2 = ProjectFileManager::Get( *mCurrProject ).Import(flacFile, true);
-   std::cout << "s2: " << s2 << std::endl;
-   */
-
-   /*
-   ProjectAudioManager::Get( *mCurrProject ).OnVirtualStudioRecord( false );
-   mIsRecording = true;
-   */
-}
-
-void VirtualStudioServerPanel::OnStop(wxCommandEvent &event)
-{
-   auto &projectAudioManager = ProjectAudioManager::Get( *mCurrProject );
-   bool canStop = projectAudioManager.CanStopAudioStream();
-   if ( canStop ) {
-      projectAudioManager.Stop();
-   }
-   mIsRecording = false;
-}
-
-void VirtualStudioServerPanel::OnClose(wxCommandEvent &event)
-{
-   std::cout << "Stopping websocket in OnClose" << std::endl;
-   mServerThread.interrupt();
-   mServerThread.join();
-   std::cout << "Stopped websocket in OnClose" << std::endl;
-   mToolbar->ToggleStudioPanel(mServerID);
-   //Close();
 }
