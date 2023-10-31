@@ -1050,6 +1050,7 @@ namespace
                   mVolumeSlider->Enable(false);
                }
             }
+            //std::cout << "ParticipantControl::SetParticipant " << name << " " << device << " " << showHidden << std::endl;
             if (!showHidden) {
                {
                   this->Show(!device.empty());
@@ -2046,7 +2047,7 @@ void ConnectionMetadata::OnOpen(WSSClient* client, ConnectionHdl hdl)
    mStatus = "Open";
    WSSClient::connection_ptr con = client->get_con_from_hdl(hdl);
 
-   std::cout << "Connection #" << mID << " opened to " << mUri << std::endl;
+   wxLogInfo("Connection #%d opened to %s", mID, mUri);
 }
 
 void ConnectionMetadata::OnFail(WSSClient* client, ConnectionHdl hdl)
@@ -2055,7 +2056,7 @@ void ConnectionMetadata::OnFail(WSSClient* client, ConnectionHdl hdl)
    WSSClient::connection_ptr con = client->get_con_from_hdl(hdl);
    mErrorReason = con->get_ec().message();
 
-   std::cout << "Connection #" << mID << " to " << mUri << " failed with: " << mErrorReason << std::endl;
+   wxLogInfo("Connection #%d to %s failed with: %s", mID, mUri, mErrorReason);
 }
 
 void ConnectionMetadata::OnClose(WSSClient* client, ConnectionHdl hdl)
@@ -2072,7 +2073,7 @@ void ConnectionMetadata::OnClose(WSSClient* client, ConnectionHdl hdl)
       << websocketpp::close::status::get_string(con->get_remote_close_code())
       << "), close reason: " << con->get_remote_close_reason();
    mErrorReason = s.str();
-   std::cout << "Connection #" << mID << " to " << mUri << " closed with: " << mErrorReason << std::endl;
+   wxLogInfo("Connection #%d to %s closed with: %s", mID, mUri, mErrorReason);
 }
 
 void ConnectionMetadata::OnMessage(ConnectionHdl hdl, WSSClient::message_ptr msg)
@@ -2094,6 +2095,7 @@ void ConnectionMetadata::OnMessage(ConnectionHdl hdl, WSSClient::message_ptr msg
    } else if (mType == WSSType::DEVICES) {
       HandleDevicesMessage(document);
    } else if (mType == WSSType::METERS) {
+      //std::cout << "Meters: " << payload << std::endl;
       HandleMetersMessage(document);
    } else {
       std::cout << "Unhandled message is " << payload << std::endl;
@@ -2143,6 +2145,7 @@ void ConnectionMetadata::HandleDevicesMessage(const rapidjson::Document &documen
       deviceToOwnerMap->erase(deviceID);
    } else {
       deviceToOwnerMap->insert({deviceID, ownerID});
+      subMap->UpdateParticipantDevice(ownerID, deviceID);
       subMap->UpdateParticipantMute(ownerID, captureMute);
       subMap->UpdateParticipantCaptureVolume(ownerID, captureVolume);
    }
@@ -2163,7 +2166,6 @@ void ConnectionMetadata::HandleMetersMessage(const rapidjson::Document &document
    std::map<std::string, std::string> usersToDevice;
    std::map<std::string, int> deviceToIndex;
 
-   //std::cout << "Meters: " << payload << std::endl;
    auto musicians = document["musicians"].GetArray();
    int idx = 0;
    for (auto& v : document["clients"].GetArray()) {
@@ -2241,11 +2243,11 @@ WebsocketEndpoint::~WebsocketEndpoint()
 
       auto connID = it->second->GetID();
       auto handle = it->second->GetHdl();
-      std::cout << "> Closing connection " << connID << " from url " << mUri << std::endl;
+      wxLogInfo("> Closing connection #%d to url %s", connID, mUri);
       websocketpp::lib::error_code ec;
       mClient.close(handle, websocketpp::close::status::normal, "", ec);
       if (ec) {
-         std::cout << "> Error closing connection " << connID << ": " << ec.message() << std::endl;
+         wxLogInfo("> Error closing connection #%d: %s", connID, ec.message());
       }
    }
 
@@ -2279,7 +2281,7 @@ int WebsocketEndpoint::Connect()
    websocketpp::lib::error_code ec;
    WSSClient::connection_ptr con = mClient.get_connection(mUri, ec);
    if (ec) {
-      std::cout << "> Connect initialization error: " << ec.message() << std::endl;
+      wxLogInfo("> Connect initialization error: %s", ec.message());
       return -1;
    }
 
@@ -2337,13 +2339,13 @@ void WebsocketEndpoint::Close(int id, websocketpp::close::status::value code, st
 
    con_list::iterator metadata_it = mConnectionList.find(id);
    if (metadata_it == mConnectionList.end()) {
-      std::cout << "> No connection found with id " << id << std::endl;
+      wxLogInfo("> No connection found with id %d", id);
       return;
    }
 
    mClient.close(metadata_it->second->GetHdl(), code, reason, ec);
    if (ec) {
-      std::cout << "> Error initiating close: " << ec.message() << std::endl;
+      wxLogInfo("> Error initiating close: %s", ec.message());
    }
 }
 
@@ -2804,7 +2806,7 @@ void VirtualStudioPanel::InitServerWebsocket()
    mServerClient->SetReconnect(true);
    auto id = mServerClient->Connect();
    if (id == -1) {
-      std::cout << "Failed starting mServerClient" << std::endl;
+      wxLogInfo("Failed starting mServerClient");
    }
 }
 
@@ -2818,7 +2820,7 @@ void VirtualStudioPanel::InitSubscriptionsWebsocket()
    mSubscriptionsClient->SetReconnect(true);
    auto id = mSubscriptionsClient->Connect();
    if (id == -1) {
-      std::cout << "Failed starting mSubscriptionsClient" << std::endl;
+      wxLogInfo("Failed starting mSubscriptionsClient");
    }
 }
 
@@ -2832,7 +2834,7 @@ void VirtualStudioPanel::InitDevicesWebsocket()
    mDevicesClient->SetReconnect(true);
    auto id = mDevicesClient->Connect();
    if (id == -1) {
-      std::cout << "Failed starting mDevicesClient" << std::endl;
+      wxLogInfo("Failed starting mDevicesClient");
    }
 }
 
@@ -2919,7 +2921,7 @@ void VirtualStudioPanel::InitMetersWebsocket()
    mMetersClient->SetReconnect(true);
    auto id = mMetersClient->Connect();
    if (id == -1) {
-      std::cout << "Failed starting mMetersClient" << std::endl;
+      wxLogInfo("Failed starting mMetersClient");
    }
 }
 
@@ -3166,7 +3168,7 @@ void VirtualStudioPanel::FetchMediaSegment(const std::string &filename)
    if (!ServerIsReady() || mTrackName.IsEmpty() || mServerBroadcast == 0) {
       return;
    }
-   std::cout << "FetchMediaSegment for " << filename << std::endl;
+   wxLogInfo("FetchMediaSegment for: %s", filename);
 
    auto outputDir = VirtualStudioPanel::GetDownloadLocalDir(mServerID);
    if (!wxDirExists(outputDir)) {
@@ -3195,7 +3197,6 @@ void VirtualStudioPanel::FetchMediaSegment(const std::string &filename)
       {
          const auto httpCode = response->getHTTPCode();
          wxLogInfo("FetchMediaSegment HTTP code: %d", httpCode);
-         std::cout << "FetchMediaSegment HTTP code: " << httpCode << std::endl;
 
          downloadFile->Close();
 
@@ -3228,28 +3229,26 @@ void VirtualStudioPanel::LoadSegment(const std::string &filepath)
    auto newTags = oldTags->Duplicate();
    bool isFirstSegment = mRecTracks.size() == 0;
 
-   std::cout << "LoadSegment for " << filepath << std::endl;
+   wxLogInfo("LoadSegment for: %s", filepath);
    // check if this image file exists
    std::ifstream f(filepath.c_str());
    if (!f.good()) {
-      std::cout << "File " << filepath << " does not exist" << std::endl;
+      wxLogInfo("File %s does not exist", filepath);
       return;
    }
 
    // initialize Importer
    auto &importer = Importer::Get();
    if (!importer.Initialize()) {
-      std::cout << "Failed to initialize importer" << std::endl;
+      wxLogInfo("Failed to initialize importer");
       return;
    }
 
    TrackHolders tmpTracks;
    TranslatableString errorMessage;
-   std::cout << "calling Import" << std::endl;
    bool success = importer.Import(mProject, filepath, &trackFactory, tmpTracks, newTags.get(), errorMessage);
-   std::cout << "done Import" << std::endl;
    if (!success || !errorMessage.empty()) {
-      std::cout << "Failed to load file " << filepath << " with error: " << errorMessage  << std::endl;
+      wxLogInfo("Failed to import file: %s", filepath);
       return;
    }
 
@@ -3289,8 +3288,9 @@ void VirtualStudioPanel::LoadSegment(const std::string &filepath)
       trackWindow->SetFocus();
    }
 
+   wxLogInfo("Successfully imported %s", filepath);
    if (!wxRemoveFile(filepath)) {
-      std::cout << "failed to remove " << filepath << std::endl;
+      wxLogInfo("Failed to remove file: %s", filepath);
    }
 }
 
@@ -3370,7 +3370,7 @@ void VirtualStudioPanel::OnRecord(const wxCommandEvent& event)
 
    // generate track name
    mTrackName = trackList.MakeUniqueTrackName(mServerName);
-   std::cout << "Track name: " << mTrackName << std::endl;
+   wxLogInfo("Created track name: %s", mTrackName);
 
    mDownloadedMediaFiles.clear();
    mRecTracks.clear(); // WaveTrackArray
@@ -3417,7 +3417,6 @@ void VirtualStudioPanel::OnRecord(const wxCommandEvent& event)
 
 void VirtualStudioPanel::OnNewRecordingSegment(const wxTimerEvent& event)
 {
-   std::cout << "calling OnNewRecordingSegment" << std::endl;
    std::string filename;
 
    if (!ServerIsReady() || mTrackName.IsEmpty() || mServerBroadcast == 0) {
