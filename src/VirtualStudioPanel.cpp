@@ -897,6 +897,9 @@ namespace
             mParticipant->SetCaptureVolume(valInt);
             mParticipant->SyncDeviceAPI();
          });
+         volumeSlider->Bind(wxEVT_MOUSEWHEEL, [this](wxMouseEvent&) {
+            wxLogInfo("Mouse wheel event");
+         });
          mVolumeSlider = volumeSlider;
 
          //auto bottomText = safenew ThemedWindowWrapper<wxStaticText>(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
