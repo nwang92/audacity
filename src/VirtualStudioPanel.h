@@ -294,6 +294,7 @@ class VirtualStudioPanel : public wxPanel
    wxStaticText* mStudioTitle {nullptr};
    wxStaticText* mStudioStatus {nullptr};
    AButton* mJoinStudio{nullptr};
+   AButton* mBroadcastButton{nullptr};
    AButton* mRecButton{nullptr};
    VirtualStudioParticipantListWindow* mParticipantsList{nullptr};
    wxWindow* mHeader{nullptr};
@@ -327,6 +328,7 @@ class VirtualStudioPanel : public wxPanel
    std::shared_ptr<WebsocketEndpoint> mMetersClient{nullptr};
    std::shared_ptr<boost::thread> mActiveParticipantsThread{nullptr};
    std::shared_ptr<boost::thread> mRecordingThread{nullptr};
+   mutable std::mutex mRecordingMutex;
 
    StudioParticipantMap* mSubscriptionsMap{nullptr};
    std::map<std::string, std::string> mDeviceToOwnerMap;
@@ -380,6 +382,7 @@ public:
 private:
    void OnJoin(const wxCommandEvent& event);
    void OnRecord(const wxCommandEvent& event);
+   void OnBroadcast(const wxCommandEvent& event);
    void OnNewRecordingSegment(const wxTimerEvent& event);
    void OnCharHook(wxKeyEvent& evt);
    void Disconnect(std::shared_ptr<WebsocketEndpoint>& endpoint);
@@ -401,4 +404,7 @@ private:
    void FetchFullMixMediaSegments();
    void FetchMediaSegment(const std::string &filename);
    void LoadSegment(const std::string &filepath);
+   void EnableBroadcast();
+   void DisableBroadcast();
+   void ActivateBroadcast(int val);
 };

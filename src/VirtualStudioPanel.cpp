@@ -2495,7 +2495,7 @@ VirtualStudioPanel::VirtualStudioPanel(
 #endif
    actions->SetBackgroundColorIndex(clrMedium);
    {
-      auto shSizer = std::make_unique<wxBoxSizer>(wxHORIZONTAL);
+      auto row1 = std::make_unique<wxBoxSizer>(wxHORIZONTAL);
       auto joinButton = safenew ThemedAButtonWrapper<AButton>(actions, wxID_ANY);
       joinButton->SetImageIndices(0,
             bmpHButtonNormal,
@@ -2509,6 +2509,22 @@ VirtualStudioPanel::VirtualStudioPanel(
       joinButton->SetForegroundColorIndex(clrTrackPanelText);
       joinButton->Bind(wxEVT_BUTTON, &VirtualStudioPanel::OnJoin, this);
       mJoinStudio = joinButton;
+      row1->Add(joinButton, 1, wxALL | wxEXPAND, 4);
+
+      auto row2 = std::make_unique<wxBoxSizer>(wxHORIZONTAL);
+      auto broadcastButton = safenew ThemedAButtonWrapper<AButton>(actions, wxID_ANY);
+      broadcastButton->SetImageIndices(0,
+            bmpHButtonNormal,
+            bmpHButtonHover,
+            bmpHButtonDown,
+            bmpHButtonHover,
+            bmpHButtonDisabled);
+      broadcastButton->SetTranslatableLabel(XO("Record"));
+      broadcastButton->SetButtonType(AButton::TextButton);
+      broadcastButton->SetBackgroundColorIndex(clrMedium);
+      broadcastButton->SetForegroundColorIndex(clrTrackPanelText);
+      broadcastButton->Bind(wxEVT_BUTTON, &VirtualStudioPanel::OnBroadcast, this);
+      mBroadcastButton = broadcastButton;
 
       auto recButton = safenew ThemedAButtonWrapper<AButton>(actions, wxID_ANY);
       recButton->SetImageIndices(0,
@@ -2517,16 +2533,20 @@ VirtualStudioPanel::VirtualStudioPanel(
             bmpHButtonDown,
             bmpHButtonHover,
             bmpHButtonDisabled);
-      recButton->SetTranslatableLabel(XO("Record"));
+      recButton->SetTranslatableLabel(XO("Track"));
       recButton->SetButtonType(AButton::TextButton);
       recButton->SetBackgroundColorIndex(clrMedium);
       recButton->SetForegroundColorIndex(clrTrackPanelText);
       recButton->Bind(wxEVT_BUTTON, &VirtualStudioPanel::OnRecord, this);
       mRecButton = recButton;
 
-      shSizer->Add(joinButton, 1, wxLEFT | wxRIGHT | wxTOP | wxEXPAND, 4);
-      shSizer->Add(recButton, 1, wxLEFT | wxRIGHT | wxTOP | wxEXPAND, 4);
-      actions->SetSizer(shSizer.release());
+      row2->Add(broadcastButton, 1, wxALL | wxEXPAND, 4);
+      row2->Add(recButton, 1, wxALL | wxEXPAND, 4);
+
+      auto controlsSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
+      controlsSizer->Add(row1.release(), 1, wxEXPAND, 2);
+      controlsSizer->Add(row2.release(), 1, wxEXPAND, 2);
+      actions->SetSizer(controlsSizer.release());
    }
    vSizer->Add(actions, 0, wxEXPAND);
    vSizer->Add(2, 4);
@@ -2664,6 +2684,15 @@ void VirtualStudioPanel::UpdateServerBroadcast(int broadcast) {
    mServerBroadcast = broadcast;
    if (broadcast == 0) {
       StopRecording();
+      if (mBroadcastButton) {
+         mBroadcastButton->SetLabel(XO("Record"));
+         mBroadcastButton->SetForegroundColour(theTheme.Colour(clrTrackPanelText));
+      }
+   } else {
+      if (mBroadcastButton) {
+         mBroadcastButton->SetLabel(XO("End"));
+         mBroadcastButton->SetForegroundColour(theTheme.Colour(clrMeterInputClipBrush));
+      }
    }
 }
 
@@ -2860,6 +2889,74 @@ void VirtualStudioPanel::InitActiveParticipants()
    mActiveParticipantsThread->detach();
 }
 
+void VirtualStudioPanel::EnableBroadcast()
+{
+   if (!ServerIsReady() || mServerBroadcast > 0) {
+      return;
+   }
+   // see https://github.com/jacktrip/jacktrip-agent/blob/develop/pkg/client/servers.go#L70
+   ActivateBroadcast(10);
+}
+
+void VirtualStudioPanel::DisableBroadcast()
+{
+   if (!ServerIsReady() || mServerBroadcast == 0) {
+      return;
+   }
+   // see https://github.com/jacktrip/jacktrip-agent/blob/develop/pkg/client/servers.go#L70
+   ActivateBroadcast(0);
+}
+
+void VirtualStudioPanel::ActivateBroadcast(int val)
+{
+   if (!ServerIsReady() || mServerSessionID.empty()) {
+      return;
+   }
+
+   // generate payload
+   rapidjson::Document document;
+   document.SetObject();
+   wxString wxSessionID(mServerSessionID);
+   document.AddMember(
+      "sessionId",
+      rapidjson::Value(wxSessionID.data(), wxSessionID.length(), document.GetAllocator()),
+      document.GetAllocator());
+   document.AddMember("visibility", rapidjson::Value(val), document.GetAllocator());
+
+   rapidjson::StringBuffer buffer;
+   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+   document.Accept(writer);
+   auto payload = std::string(buffer.GetString());
+
+   audacity::network_manager::Request request(kApiBaseUrl + "/api/servers/" + mServerID + "/stream/activate");
+   request.setHeader("Authorization", "Bearer " + mAccessToken);
+   request.setHeader("Content-Type", "application/json");
+   request.setHeader("Accept", "application/json");
+
+   auto response = audacity::network_manager::NetworkManager::GetInstance().doPost(request, payload.data(), payload.size());
+   response->setRequestFinishedCallback(
+      [response, this](auto)
+      {
+         const auto httpCode = response->getHTTPCode();
+         wxLogInfo("ActivateBroadcast HTTP code: %d", httpCode);
+
+         if (httpCode != 200) {
+            wxTheApp->CallAfter([] {
+               BasicUI::ShowErrorDialog( {},
+                  XC("Recording Failed", "Virtual Studio"),
+                  XC("Failed to engage/disengage private recording with stems.", "Virtual Studio"),
+                  wxString(),
+                  BasicUI::ErrorDialogOptions{ BasicUI::ErrorDialogType::ModalErrorReport });
+               }
+            );
+            return;
+         }
+         //const auto body = response->readAll<std::string>();
+         //std::cout << "ActivateBroadcast Body: " << body << std::endl;
+      }
+   );
+}
+
 void VirtualStudioPanel::InitRecording()
 {
    if (!ServerIsReady()) {
@@ -2894,7 +2991,7 @@ void VirtualStudioPanel::StopRecording()
    mTrackName.Clear();
    mRecordingTimer.Stop();
    if (mRecordingThread) {
-      mRecordingThread->interrupt();
+      //mRecordingThread->interrupt();
       mRecordingThread->join();
    }
    mRecordingThread.reset();
@@ -2906,7 +3003,7 @@ void VirtualStudioPanel::StopRecording()
 
    mDownloadedMediaFiles.clear();
    mRecTracks.clear(); // WaveTrackArray
-   mRecButton->SetLabel(XO("Record"));
+   mRecButton->SetLabel(XO("Track"));
    mRecButton->SetForegroundColour(theTheme.Colour(clrTrackPanelText));
 }
 
@@ -3359,8 +3456,8 @@ void VirtualStudioPanel::OnRecord(const wxCommandEvent& event)
    if (mServerBroadcast == 0) {
       wxTheApp->CallAfter([] {
          BasicUI::ShowErrorDialog( {},
-            XC("Broadcast is Offline", "Virtual Studio"),
-            XC("Enable broadcasting to start capturing audio.", "Virtual Studio"),
+            XC("Recording Disabled", "Virtual Studio"),
+            XC("Enable recording to start tracking audio within Audacity.", "Virtual Studio"),
             wxString(),
             BasicUI::ErrorDialogOptions{ BasicUI::ErrorDialogType::ModalErrorReport });
          }
@@ -3416,6 +3513,31 @@ void VirtualStudioPanel::OnRecord(const wxCommandEvent& event)
    ProjectFileManager::Get( mProject ).AddImportedTracks(files[0], std::move(trackHolder));
    std::cout << "done AddImportedTracks" << std::endl;
    */
+}
+
+void VirtualStudioPanel::OnBroadcast(const wxCommandEvent& event)
+{
+   if (!ServerIsReady() || mServerID.empty() || mAccessToken.empty()) {
+      return;
+   }
+   if (!mServerAdmin) {
+      wxTheApp->CallAfter([] {
+         BasicUI::ShowErrorDialog( {},
+            XC("Not Allowed", "Virtual Studio"),
+            XC("This requires Virtual Studio studio admin permissions.", "Virtual Studio"),
+            wxString(),
+            BasicUI::ErrorDialogOptions{ BasicUI::ErrorDialogType::ModalErrorReport });
+         }
+      );
+      return;
+   }
+
+   if (mServerBroadcast == 0) {
+      EnableBroadcast();
+   } else {
+      StopRecording();
+      DisableBroadcast();
+   }
 }
 
 void VirtualStudioPanel::OnNewRecordingSegment(const wxTimerEvent& event)
